@@ -13,7 +13,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "npm run build && electron-builder --win portable",
-	"clear-windows-icon-cache": "powershell scripts/delete-ico-cache.ps1"
+    "clear-windows-icon-cache": "powershell scripts/delete-ico-cache.ps1",
+
+    "release:windows": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 patch",
+    "release:windows:minor": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 minor",
+    "release:windows:major": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 major",
+
+    "release:unix": "bash scripts/release.sh patch",
+    "release:unix:minor": "bash scripts/release.sh minor",
+    "release:unix:major": "bash scripts/release.sh major"
   },
   "dependencies": {
     "music-metadata": "^11.9.0",
