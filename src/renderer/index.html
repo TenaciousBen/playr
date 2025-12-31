@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audioplayer</title>
+
+    <!-- Design dependencies (can be replaced by local bundling later) -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <script>
+      window.FontAwesomeConfig = { autoReplaceSvg: "nest" };
+    </script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "sans-serif"]
+            }
+          }
+        }
+      };
+    </script>
+    <style>
+      ::-webkit-scrollbar {
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body class="bg-gray-900 text-white font-sans overflow-hidden">
+    <div id="app-container" class="h-screen w-screen flex flex-col">
+      <!-- Header -->
+      <header
+        id="header"
+        class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between"
+      >
+        <div class="flex items-center space-x-4">
+          <i class="fas fa-headphones text-blue-500 text-2xl"></i>
+          <h1 class="text-xl font-semibold">Audioplayer</h1>
+        </div>
+
+        <!-- Search Bar -->
+        <div id="search-container" class="flex-1 max-w-md mx-8">
+          <div class="relative">
+            <input
+              id="search-input"
+              type="text"
+              placeholder="Search audiobooks, authors, titles..."
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <i
+              class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            ></i>
+          </div>
+        </div>
+
+        <!-- View Options -->
+        <div id="view-options" class="flex items-center space-x-2">
+          <button class="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors">
+            <i class="fas fa-th-large text-gray-300"></i>
+          </button>
+          <button class="p-2 hover:bg-gray-700 rounded-lg transition-colors">
+            <i class="fas fa-list text-gray-400"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main id="main-content" class="flex-1 flex overflow-hidden">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="w-64 bg-gray-800 border-r border-gray-700 p-4">
+          <nav class="space-y-2">
+            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              Library
+            </div>
+            <a
+              href="#/library"
+              data-route="library"
+              class="flex items-center space-x-3 p-2 bg-blue-600 text-white rounded-lg"
+            >
+              <i class="fas fa-book"></i>
+              <span>All Audiobooks</span>
+            </a>
+            <a
+              href="#/recent"
+              data-route="recent"
+              class="flex items-center space-x-3 p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <i class="fas fa-clock"></i>
+              <span>Recently Added</span>
+            </a>
+            <a
+              href="#/reading"
+              data-route="reading"
+              class="flex items-center space-x-3 p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <i class="fas fa-play-circle"></i>
+              <span>Currently Reading</span>
+            </a>
+            <a
+              href="#/favorites"
+              data-route="favorites"
+              class="flex items-center space-x-3 p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <i class="fas fa-heart"></i>
+              <span>Favorites</span>
+            </a>
+          </nav>
+
+          <div class="mt-8">
+            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              Collections
+            </div>
+            <div class="space-y-1">
+              <div
+                class="flex items-center justify-between p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <span class="text-sm">Fiction</span>
+                <span class="text-xs text-gray-500">24</span>
+              </div>
+              <div
+                class="flex items-center justify-between p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <span class="text-sm">Non-Fiction</span>
+                <span class="text-xs text-gray-500">18</span>
+              </div>
+              <div
+                class="flex items-center justify-between p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <span class="text-sm">Biography</span>
+                <span class="text-xs text-gray-500">7</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8 pt-6 border-t border-gray-700">
+            <a
+              href="#/settings"
+              data-route="settings"
+              class="flex items-center space-x-3 p-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <i class="fas fa-gear"></i>
+              <span>Settings</span>
+            </a>
+          </div>
+        </aside>
+
+        <!-- Pages slot (settings will hide the footer player) -->
+        <div id="page-slot" class="flex-1 overflow-hidden">
+          <!-- Library View (default home) -->
+          <section id="library-view" class="flex-1 p-6 overflow-y-auto">
+            <div class="flex items-center justify-between mb-6">
+              <div>
+                <h2 class="text-2xl font-bold">All Audiobooks</h2>
+                <p id="library-count" class="text-gray-400 mt-1">Loading…</p>
+              </div>
+              <div class="flex items-center space-x-3">
+                <select
+                  class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option>Sort by Title</option>
+                  <option>Sort by Author</option>
+                  <option>Sort by Date Added</option>
+                  <option>Sort by Progress</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Audiobook Grid -->
+            <div id="audiobook-grid" class="grid grid-cols-5 gap-6">
+              <!-- Static design cards (will be replaced by real library data later) -->
+              <div class="audiobook-card group cursor-pointer">
+                <div class="relative mb-3">
+                  <img
+                    class="w-full h-48 object-cover rounded-lg shadow-lg"
+                    src="https://storage.googleapis.com/uxpilot-auth.appspot.com/9247ca16d4-b3fe503e842b597223c9.png"
+                    alt="fantasy book cover"
+                  />
+                  <div
+                    class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center"
+                  >
+                    <i
+                      class="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    ></i>
+                  </div>
+                  <div class="absolute bottom-2 left-2 bg-blue-600 text-xs px-2 py-1 rounded">
+                    67%
+                  </div>
+                </div>
+                <h3 class="font-semibold text-sm mb-1 line-clamp-2">The Name of the Wind</h3>
+                <p class="text-gray-400 text-xs mb-1">Patrick Rothfuss</p>
+                <p class="text-gray-500 text-xs">27h 32m</p>
+              </div>
+
+              <div class="audiobook-card group cursor-pointer">
+                <div class="relative mb-3">
+                  <img
+                    class="w-full h-48 object-cover rounded-lg shadow-lg"
+                    src="https://storage.googleapis.com/uxpilot-auth.appspot.com/5f6aed6c31-f08dd0cdf5fb53af9c05.png"
+                    alt="science fiction book cover"
+                  />
+                  <div
+                    class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center"
+                  >
+                    <i
+                      class="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    ></i>
+                  </div>
+                </div>
+                <h3 class="font-semibold text-sm mb-1 line-clamp-2">Project Hail Mary</h3>
+                <p class="text-gray-400 text-xs mb-1">Andy Weir</p>
+                <p class="text-gray-500 text-xs">16h 10m</p>
+              </div>
+
+              <div class="audiobook-card group cursor-pointer">
+                <div class="relative mb-3">
+                  <img
+                    class="w-full h-48 object-cover rounded-lg shadow-lg"
+                    src="https://storage.googleapis.com/uxpilot-auth.appspot.com/af4385d471-ef1d37dc69cc855dbf10.png"
+                    alt="classic literature book cover"
+                  />
+                  <div
+                    class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center"
+                  >
+                    <i
+                      class="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    ></i>
+                  </div>
+                  <div class="absolute bottom-2 left-2 bg-blue-600 text-xs px-2 py-1 rounded">
+                    23%
+                  </div>
+                </div>
+                <h3 class="font-semibold text-sm mb-1 line-clamp-2">Dune</h3>
+                <p class="text-gray-400 text-xs mb-1">Frank Herbert</p>
+                <p class="text-gray-500 text-xs">21h 2m</p>
+              </div>
+
+              <div class="audiobook-card group cursor-pointer">
+                <div class="relative mb-3">
+                  <img
+                    class="w-full h-48 object-cover rounded-lg shadow-lg"
+                    src="https://storage.googleapis.com/uxpilot-auth.appspot.com/3af537d408-f386fbe44df590dc3efe.png"
+                    alt="mystery thriller book cover"
+                  />
+                  <div
+                    class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center"
+                  >
+                    <i
+                      class="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    ></i>
+                  </div>
+                </div>
+                <h3 class="font-semibold text-sm mb-1 line-clamp-2">The Silent Patient</h3>
+                <p class="text-gray-400 text-xs mb-1">Alex Michaelides</p>
+                <p class="text-gray-500 text-xs">8h 43m</p>
+              </div>
+
+              <div class="audiobook-card group cursor-pointer">
+                <div class="relative mb-3">
+                  <img
+                    class="w-full h-48 object-cover rounded-lg shadow-lg"
+                    src="https://storage.googleapis.com/uxpilot-auth.appspot.com/2ba4009365-d737b98b956ba0ce37f0.png"
+                    alt="biography book cover"
+                  />
+                  <div
+                    class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center"
+                  >
+                    <i
+                      class="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    ></i>
+                  </div>
+                  <div class="absolute bottom-2 left-2 bg-green-600 text-xs px-2 py-1 rounded">
+                    Done
+                  </div>
+                </div>
+                <h3 class="font-semibold text-sm mb-1 line-clamp-2">Becoming</h3>
+                <p class="text-gray-400 text-xs mb-1">Michelle Obama</p>
+                <p class="text-gray-500 text-xs">19h 3m</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Settings page (placeholder). When active, the footer player should be hidden. -->
+          <section id="settings-view" class="hidden flex-1 p-6 overflow-y-auto">
+            <h2 class="text-2xl font-bold mb-2">Settings</h2>
+            <p class="text-gray-400">
+              Settings page placeholder. The media player footer is hidden on this page.
+            </p>
+          </section>
+        </div>
+      </main>
+
+      <!-- Media Controls Footer (shared across most pages) -->
+      <footer id="media-controls" class="bg-gray-800 border-t border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <!-- Currently Playing Info -->
+          <div id="current-track-info" class="flex items-center space-x-4 w-1/3">
+            <img
+              class="w-12 h-12 object-cover rounded"
+              src="https://storage.googleapis.com/uxpilot-auth.appspot.com/360c61db30-adc9c200e74cb459c548.png"
+              alt="book cover thumbnail"
+            />
+            <div>
+              <h4 class="text-sm font-medium">The Name of the Wind</h4>
+              <p class="text-xs text-gray-400">Patrick Rothfuss</p>
+            </div>
+          </div>
+
+          <!-- Media Controls -->
+          <div id="playback-controls" class="flex flex-col items-center w-1/3">
+            <div class="flex items-center space-x-4 mb-2">
+              <button class="text-gray-400 hover:text-white transition-colors" title="Previous chapter">
+                <i class="fas fa-step-backward"></i>
+              </button>
+              <button class="text-gray-400 hover:text-white transition-colors" title="Back 10 seconds">
+                <i class="fas fa-backward text-lg"></i>
+              </button>
+              <button
+                id="play-pause"
+                class="bg-blue-600 hover:bg-blue-700 text-white w-10 h-10 rounded-full flex items-center justify-center transition-colors"
+                title="Play/Pause"
+              >
+                <i class="fas fa-pause"></i>
+              </button>
+              <button class="text-gray-400 hover:text-white transition-colors" title="Forward 10 seconds">
+                <i class="fas fa-forward text-lg"></i>
+              </button>
+              <button class="text-gray-400 hover:text-white transition-colors" title="Next chapter">
+                <i class="fas fa-step-forward"></i>
+              </button>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="flex items-center space-x-3 w-full max-w-md">
+              <span class="text-xs text-gray-400">2:34:12</span>
+              <div class="flex-1 bg-gray-600 h-1 rounded-full">
+                <div class="bg-blue-500 h-1 rounded-full" style="width: 67%"></div>
+              </div>
+              <span class="text-xs text-gray-400">27:32:45</span>
+            </div>
+          </div>
+
+          <!-- Additional Controls -->
+          <div id="additional-controls" class="flex items-center space-x-4 w-1/3 justify-end">
+            <div class="flex items-center space-x-2">
+              <i class="fas fa-tachometer-alt text-gray-400 text-sm"></i>
+              <select class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white">
+                <option>1x</option>
+                <option>1.25x</option>
+                <option>1.5x</option>
+                <option>2x</option>
+              </select>
+            </div>
+            <button class="text-gray-400 hover:text-white transition-colors" title="Bookmark">
+              <i class="fas fa-bookmark"></i>
+            </button>
+            <button class="text-gray-400 hover:text-white transition-colors" title="Volume">
+              <i class="fas fa-volume-up"></i>
+            </button>
+            <div class="w-20 bg-gray-600 h-1 rounded-full">
+              <div class="bg-white h-1 rounded-full" style="width: 75%"></div>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Renderer entrypoint (bundler should compile TS -> JS; update path accordingly) -->
+    <script type="module" src="./index.ts"></script>
+  </body>
+</html>
+
+
