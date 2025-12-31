@@ -28,7 +28,12 @@ const api: AudioplayerApi = {
 
       return await ipcRenderer.invoke(IpcChannels.Library.AddFiles, paths);
     },
-    remove: (audiobookId) => ipcRenderer.invoke(IpcChannels.Library.Remove, audiobookId)
+    remove: (audiobookId) => ipcRenderer.invoke(IpcChannels.Library.Remove, audiobookId),
+    clear: () => ipcRenderer.invoke(IpcChannels.Library.Clear)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IpcChannels.Settings.Get),
+    set: (settings) => ipcRenderer.invoke(IpcChannels.Settings.Set, settings)
   },
   playback: {
     getState: () => ipcRenderer.invoke(IpcChannels.Playback.GetState),

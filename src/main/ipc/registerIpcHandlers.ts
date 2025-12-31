@@ -7,6 +7,10 @@ import { ingestPathsToAudiobooks } from "@/src/main/library/ingest";
 import { loadLibrary, saveLibrary } from "@/src/main/persistence/libraryStore";
 import { loadPlayback, savePlayback } from "@/src/main/persistence/playbackStore";
 import fs from "fs/promises";
+import path from "path";
+import { app } from "electron";
+import { loadSettings, saveSettings } from "@/src/main/persistence/settingsStore";
+import type { UserSettings } from "@/src/shared/models/userSettings";
 
 /**
  * Central place to register IPC handlers.
@@ -113,6 +117,25 @@ export function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(IpcChannels.Library.Clear, async (): Promise<void> => {
+    // Clear library + playback + extracted covers. Best-effort; ignore missing files.
+    try {
+      await saveLibrary([]);
+    } catch {
+      // ignore
+    }
+    try {
+      await savePlayback({ byAudiobookId: {} });
+    } catch {
+      // ignore
+    }
+    try {
+      await fs.rm(path.join(app.getPath("userData"), "covers"), { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
   ipcMain.handle(
     IpcChannels.Library.AddFolders,
     async (
@@ -141,6 +164,17 @@ export function registerIpcHandlers() {
     const states = Object.values(persisted.byAudiobookId);
     return states[0] ?? { isPlaying: false, rate: 1 };
   });
+
+  ipcMain.handle(IpcChannels.Settings.Get, async (): Promise<UserSettings> => {
+    return await loadSettings();
+  });
+
+  ipcMain.handle(
+    IpcChannels.Settings.Set,
+    async (_event: IpcMainInvokeEvent, settings: UserSettings): Promise<void> => {
+      await saveSettings(settings);
+    }
+  );
 
   ipcMain.handle(
     IpcChannels.Playback.GetStateForAudiobook,

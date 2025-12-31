@@ -7,8 +7,13 @@ export const IpcChannels = {
     AddFiles: "library:add-files",
     AddFolders: "library:add-folders",
     Remove: "library:remove",
+    Clear: "library:clear",
     Search: "library:search",
     List: "library:list"
+  },
+  Settings: {
+    Get: "settings:get",
+    Set: "settings:set"
   },
   Playback: {
     Play: "playback:play",

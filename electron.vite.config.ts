@@ -1,4 +1,5 @@
 import { defineConfig } from "electron-vite";
+import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
@@ -15,7 +16,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [tsconfigPaths()],
+    plugins: [tsconfigPaths(), react()],
     build: {
       outDir: "dist"
     }

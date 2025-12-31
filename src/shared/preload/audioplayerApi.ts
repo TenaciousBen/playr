@@ -1,5 +1,6 @@
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
+import type { UserSettings } from "@/src/shared/models/userSettings";
 
 /**
  * API exposed by the preload script to the renderer via `contextBridge`.
@@ -19,6 +20,11 @@ export type AudioplayerApi = {
      */
     addDroppedFiles(files: File[]): Promise<void>;
     remove(audiobookId: string): Promise<void>;
+    clear(): Promise<void>;
+  };
+  settings: {
+    get(): Promise<UserSettings>;
+    set(settings: UserSettings): Promise<void>;
   };
   playback: {
     getState(): Promise<PlaybackState>;
