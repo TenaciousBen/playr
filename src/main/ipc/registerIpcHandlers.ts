@@ -3,7 +3,6 @@ import { IpcChannels } from "@/src/shared/ipc/channels";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
 import type { IpcMainInvokeEvent } from "electron";
-import { ingestPathsToAudiobooks } from "@/src/main/library/ingest";
 import { loadLibrary, saveLibrary } from "@/src/main/persistence/libraryStore";
 import { loadPlayback, savePlayback } from "@/src/main/persistence/playbackStore";
 import fs from "fs/promises";
@@ -13,6 +12,152 @@ import { loadSettings, saveSettings } from "@/src/main/persistence/settingsStore
 import type { UserSettings } from "@/src/shared/models/userSettings";
 import type { Collection } from "@/src/shared/models/collection";
 import { loadCollections, saveCollections } from "@/src/main/persistence/collectionsStore";
+import { Worker } from "worker_threads";
+
+type IngestProgressPayload =
+  | { type: "started"; totalFiles?: number }
+  | { type: "scanned"; totalFiles: number }
+  | { type: "book"; bookId: string; displayName: string; countDone: number; totalFiles?: number }
+  | { type: "saved"; libraryCount: number; countDone: number; totalFiles?: number }
+  | { type: "done"; libraryCount: number; countDone: number; totalFiles?: number }
+  | { type: "error"; message: string };
+
+function startIngestWorker(
+  inputPaths: string[],
+  userDataDir: string
+): Worker {
+  // The worker is bundled as a separate main-process entry by electron-vite.
+  const workerPath = path.join(__dirname, "ingestWorker.js");
+  return new Worker(workerPath, { workerData: { inputPaths, userDataDir } });
+}
+
+async function startIngestToLibrary(
+  inputPaths: string[],
+  sender: Electron.WebContents
+): Promise<void> {
+  const userDataDir = app.getPath("userData");
+  sender.send(IpcChannels.Library.IngestProgress, { type: "started" } satisfies IngestProgressPayload);
+
+  const existing = await loadLibrary();
+  const byId = new Map<string, Audiobook>();
+  for (const b of existing) byId.set(b.id, b);
+
+  let countDone = 0;
+  let totalFiles: number | undefined;
+  let pendingSave = false;
+  let lastSaveAt = 0;
+
+  const flushSave = async () => {
+    if (pendingSave) return;
+    pendingSave = true;
+    try {
+      const merged = Array.from(byId.values()).sort((a, b) =>
+        a.displayName.localeCompare(b.displayName, undefined, { numeric: true })
+      );
+      await saveLibrary(merged);
+      sender.send(IpcChannels.Library.IngestProgress, {
+        type: "saved",
+        libraryCount: merged.length,
+        countDone,
+        totalFiles
+      } satisfies IngestProgressPayload);
+    } finally {
+      pendingSave = false;
+      lastSaveAt = Date.now();
+    }
+  };
+
+  let worker: Worker;
+  try {
+    // eslint-disable-next-line no-console
+    console.log("[library:ingest] start", { count: inputPaths?.length ?? 0 });
+    worker = startIngestWorker(inputPaths, userDataDir);
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[library:ingest] failed to start worker", err);
+    sender.send(IpcChannels.Library.IngestProgress, {
+      type: "error",
+      message: String(err?.message ?? err ?? "Failed to start ingest worker")
+    } satisfies IngestProgressPayload);
+    return;
+  }
+
+  worker.on("message", (msg: any) => {
+    if (!msg || typeof msg.type !== "string") return;
+    if (msg.type === "scanned") {
+      const tf = Number(msg.totalFiles);
+      totalFiles = Number.isFinite(tf) ? tf : 0;
+      // eslint-disable-next-line no-console
+      console.log("[library:ingest] scanned", { totalFiles });
+      sender.send(IpcChannels.Library.IngestProgress, {
+        type: "scanned",
+        totalFiles: totalFiles ?? 0
+      } satisfies IngestProgressPayload);
+      return;
+    }
+    if (msg.type === "book" && msg.book) {
+      const b: Audiobook = msg.book;
+      countDone = msg.countDone ?? countDone + 1;
+      totalFiles = msg.totalFiles ?? totalFiles;
+      const prev = byId.get(b.id);
+      const merged: Audiobook = {
+        ...b,
+        isFavorite: prev?.isFavorite ?? b.isFavorite ?? false,
+        addedAt: prev?.addedAt ?? b.addedAt ?? new Date().toISOString()
+      };
+      byId.set(b.id, merged);
+      sender.send(IpcChannels.Library.IngestProgress, {
+        type: "book",
+        bookId: merged.id,
+        displayName: merged.displayName,
+        countDone,
+        totalFiles
+      } satisfies IngestProgressPayload);
+
+      // Save in batches to keep UI responsive and library durable.
+      const now = Date.now();
+      if (byId.size % 20 === 0 || now - lastSaveAt > 750) {
+        void flushSave();
+      }
+      return;
+    }
+    if (msg.type === "done") {
+      countDone = msg.countDone ?? countDone;
+      totalFiles = msg.totalFiles ?? totalFiles;
+      void (async () => {
+        await flushSave();
+        // eslint-disable-next-line no-console
+        console.log("[library:ingest] done", { countDone, totalFiles, libraryCount: byId.size });
+        sender.send(IpcChannels.Library.IngestProgress, {
+          type: "done",
+          libraryCount: byId.size,
+          countDone,
+          totalFiles
+        } satisfies IngestProgressPayload);
+        worker.terminate().catch(() => {});
+      })();
+      return;
+    }
+    if (msg.type === "error") {
+      // eslint-disable-next-line no-console
+      console.error("[library:ingest] worker error", { message: msg.message });
+      sender.send(IpcChannels.Library.IngestProgress, {
+        type: "error",
+        message: String(msg.message ?? "Ingest failed")
+      } satisfies IngestProgressPayload);
+      worker.terminate().catch(() => {});
+    }
+  });
+
+  worker.on("error", (err) => {
+    // eslint-disable-next-line no-console
+    console.error("[library:ingest] worker failed", err);
+    sender.send(IpcChannels.Library.IngestProgress, {
+      type: "error",
+      message: String(err?.message ?? err ?? "Worker failed")
+    } satisfies IngestProgressPayload);
+  });
+}
 
 /**
  * Central place to register IPC handlers.
@@ -48,53 +193,15 @@ export function registerIpcHandlers() {
   ipcMain.handle(
     IpcChannels.Library.AddFiles,
     async (_event: IpcMainInvokeEvent, filePaths: string[]): Promise<void> => {
-      try {
+      // Fire-and-forget ingestion so the renderer stays responsive.
+      void startIngestToLibrary(filePaths ?? [], _event.sender).catch((err) => {
         // eslint-disable-next-line no-console
-        console.log("[library:add-files] called", {
-          count: filePaths?.length ?? 0,
-          sample: (filePaths ?? []).slice(0, 3)
-        });
-
-        const existing = await loadLibrary();
-        // eslint-disable-next-line no-console
-        console.log("[library:add-files] existing library", { count: existing.length });
-
-        const incoming = await ingestPathsToAudiobooks(filePaths);
-        // eslint-disable-next-line no-console
-        console.log("[library:add-files] ingested", {
-          count: incoming.length,
-          sample: incoming.slice(0, 3).map((b) => ({
-            id: b.id,
-            displayName: b.displayName,
-            chapters: b.chapters.length
-          }))
-        });
-
-        // Merge by id (stable id). Preserve user fields on existing items.
-        const byId = new Map<string, Audiobook>();
-        for (const b of existing) byId.set(b.id, b);
-        for (const b of incoming) {
-          const prev = byId.get(b.id);
-          const merged: Audiobook = {
-            ...b,
-            isFavorite: prev?.isFavorite ?? b.isFavorite ?? false,
-            addedAt: prev?.addedAt ?? b.addedAt ?? new Date().toISOString()
-          };
-          byId.set(b.id, merged);
-        }
-
-        const merged = Array.from(byId.values()).sort((a, b) =>
-          a.displayName.localeCompare(b.displayName, undefined, { numeric: true })
-        );
-
-        await saveLibrary(merged);
-        // eslint-disable-next-line no-console
-        console.log("[library:add-files] saved", { count: merged.length });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error("[library:add-files] failed", err);
-        throw err;
-      }
+        console.error("[library:add-files] ingest failed", err);
+        _event.sender.send(IpcChannels.Library.IngestProgress, {
+          type: "error",
+          message: String(err?.message ?? err ?? "Ingest failed")
+        } satisfies IngestProgressPayload);
+      });
     }
   );
 
@@ -120,6 +227,23 @@ export function registerIpcHandlers() {
       try {
         const persisted = await loadPlayback();
         delete persisted.byAudiobookId[audiobookId];
+        if (persisted.lastAudiobookId === audiobookId) {
+          persisted.lastAudiobookId = undefined;
+        }
+        const q = persisted.queue ?? null;
+        if (q?.audiobookIds?.length) {
+          const oldIds = q.audiobookIds;
+          const removedIdx = oldIds.indexOf(audiobookId);
+          const nextIds = oldIds.filter((id) => id !== audiobookId);
+          if (nextIds.length === 0) {
+            persisted.queue = null;
+          } else {
+            let idx = q.index ?? 0;
+            if (removedIdx >= 0 && removedIdx <= idx) idx = Math.max(0, idx - 1);
+            if (idx >= nextIds.length) idx = nextIds.length - 1;
+            persisted.queue = { ...q, audiobookIds: nextIds, index: idx };
+          }
+        }
         await savePlayback(persisted);
       } catch {
         // ignore
@@ -135,7 +259,7 @@ export function registerIpcHandlers() {
       // ignore
     }
     try {
-      await savePlayback({ byAudiobookId: {} });
+      await savePlayback({ byAudiobookId: {}, lastAudiobookId: undefined, queue: null });
     } catch {
       // ignore
     }
@@ -152,27 +276,14 @@ export function registerIpcHandlers() {
       _event: IpcMainInvokeEvent,
       _folderPaths: string[]
     ): Promise<void> => {
-      // For now treat folders the same as dropped paths (folders will be scanned recursively).
-      const existing = await loadLibrary();
-      const incoming = await ingestPathsToAudiobooks(_folderPaths);
-
-      const byId = new Map<string, Audiobook>();
-      for (const b of existing) byId.set(b.id, b);
-      for (const b of incoming) {
-        const prev = byId.get(b.id);
-        const merged: Audiobook = {
-          ...b,
-          isFavorite: prev?.isFavorite ?? b.isFavorite ?? false,
-          addedAt: prev?.addedAt ?? b.addedAt ?? new Date().toISOString()
-        };
-        byId.set(b.id, merged);
-      }
-
-      const merged = Array.from(byId.values()).sort((a, b) =>
-        a.displayName.localeCompare(b.displayName, undefined, { numeric: true })
-      );
-
-      await saveLibrary(merged);
+      void startIngestToLibrary(_folderPaths ?? [], _event.sender).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[library:add-folders] ingest failed", err);
+        _event.sender.send(IpcChannels.Library.IngestProgress, {
+          type: "error",
+          message: String(err?.message ?? err ?? "Ingest failed")
+        } satisfies IngestProgressPayload);
+      });
     }
   );
 
@@ -194,6 +305,32 @@ export function registerIpcHandlers() {
       const next = existing.map((b) =>
         b.id === audiobookId ? { ...b, durationSeconds: dur, chapters: b.chapters } : b
       );
+      await saveLibrary(next);
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannels.Library.UpdateMetadata,
+    async (
+      _event: IpcMainInvokeEvent,
+      audiobookId: string,
+      patch: { title?: string; authors?: string[] }
+    ): Promise<void> => {
+      const existing = await loadLibrary();
+      const next = existing.map((b) => {
+        if (b.id !== audiobookId) return b;
+        const metadata = { ...(b.metadata ?? {}) };
+        if (typeof patch?.title === "string") {
+          metadata.title = patch.title.trim() || undefined;
+        }
+        if (Array.isArray(patch?.authors)) {
+          const authors = patch.authors
+            .map((a) => String(a).trim())
+            .filter((a) => a.length > 0);
+          metadata.authors = authors.length ? authors : [];
+        }
+        return { ...b, metadata };
+      });
       await saveLibrary(next);
     }
   );
@@ -253,7 +390,7 @@ export function registerIpcHandlers() {
     const last = persisted.lastAudiobookId
       ? persisted.byAudiobookId[persisted.lastAudiobookId]
       : undefined;
-    return last ?? { isPlaying: false, rate: 1 };
+    return { ...(last ?? { isPlaying: false, rate: 1 }), queue: persisted.queue ?? null };
   });
 
   ipcMain.handle(IpcChannels.Settings.Get, async (): Promise<UserSettings> => {
@@ -292,6 +429,9 @@ export function registerIpcHandlers() {
       if (state.position?.audiobookId) {
         persisted.byAudiobookId[state.position.audiobookId] = state;
         persisted.lastAudiobookId = state.position.audiobookId;
+        if (typeof state.queue !== "undefined") {
+          persisted.queue = state.queue ?? null;
+        }
         await savePlayback(persisted);
       }
     }

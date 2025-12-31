@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IpcChannels } from "@/src/shared/ipc/channels";
 import type { AudioplayerApi } from "@/src/shared/preload/audioplayerApi";
 
+ipcRenderer.on(IpcChannels.Library.IngestProgress, (_event, payload) => {
+  try {
+    window.dispatchEvent(new CustomEvent("audioplayer:ingest-progress", { detail: payload }));
+  } catch {
+    // ignore
+  }
+});
+
 const api: AudioplayerApi = {
   library: {
     list: () => ipcRenderer.invoke(IpcChannels.Library.List),
@@ -35,6 +43,9 @@ const api: AudioplayerApi = {
     ,
     setDuration: (audiobookId, durationSeconds) =>
       ipcRenderer.invoke(IpcChannels.Library.SetDuration, audiobookId, durationSeconds)
+    ,
+    updateMetadata: (audiobookId, patch) =>
+      ipcRenderer.invoke(IpcChannels.Library.UpdateMetadata, audiobookId, patch)
   },
   collections: {
     list: () => ipcRenderer.invoke(IpcChannels.Collections.List),

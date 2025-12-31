@@ -13,6 +13,12 @@ export type PlaybackState = {
   isPlaying: boolean;
   rate: number;
   position?: PlaybackPosition;
+  /** Optional queue context (e.g. when playing a collection). */
+  queue?: {
+    collectionId: string;
+    audiobookIds: AudiobookId[];
+    index: number;
+  } | null;
 };
 
 

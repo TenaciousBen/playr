@@ -18,6 +18,9 @@ export function createMainWindow(): BrowserWindow {
     }
   });
 
+  // Remove the default application menu bar (File/Edit/View/Window/Help) on Windows/Linux.
+  mainWindow.setMenuBarVisibility(false);
+
   mainWindow.webContents.on(
     "did-fail-load",
     (_event, errorCode, errorDescription, validatedURL) => {

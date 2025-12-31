@@ -1,11 +1,7 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
-
-function toFileUrl(p: string) {
-  const norm = p.replace(/\\/g, "/");
-  return `file:///${encodeURI(norm)}`;
-}
+import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 
 function formatSeconds(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -28,6 +24,9 @@ export function DetailsModal({
   playback: PlaybackState | null;
   onClose: () => void;
 }) {
+  const [editTitle, setEditTitle] = useState("");
+  const [editAuthors, setEditAuthors] = useState("");
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -36,6 +35,21 @@ export function DetailsModal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || !book) return;
+    setEditTitle(book.metadata?.title ?? "");
+    setEditAuthors((book.metadata?.authors ?? []).join(", "));
+  }, [book, open]);
+
+  const persistIfChanged = useMemo(() => {
+    const origTitle = book?.metadata?.title ?? "";
+    const origAuthors = (book?.metadata?.authors ?? []).join(", ");
+    return {
+      titleChanged: editTitle.trim() !== origTitle.trim(),
+      authorsChanged: editAuthors.trim() !== origAuthors.trim()
+    };
+  }, [book?.metadata?.authors, book?.metadata?.title, editAuthors, editTitle]);
 
   if (!open || !book) return null;
 
@@ -60,9 +74,37 @@ export function DetailsModal({
               </div>
             )}
             <div>
-              <h2 className="text-2xl font-bold mb-2">{book.metadata?.title ?? book.displayName}</h2>
+              <input
+                className="w-full bg-transparent border border-gray-700 rounded-lg px-3 py-2 text-2xl font-bold mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={editTitle}
+                placeholder={book.displayName}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={() => {
+                  if (!persistIfChanged.titleChanged) return;
+                  void (async () => {
+                    await window.audioplayer.library.updateMetadata(book.id, { title: editTitle });
+                    window.dispatchEvent(new Event("audioplayer:library-changed"));
+                  })();
+                }}
+              />
               <p className="text-gray-400 text-sm mb-1">{book.metadata?.subtitle ?? ""}</p>
-              <p className="text-blue-400 text-sm mb-3">{book.metadata?.authors?.join(", ") ?? ""}</p>
+              <input
+                className="w-full bg-transparent border border-gray-700 rounded-lg px-3 py-2 text-blue-400 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={editAuthors}
+                placeholder="Author(s) (comma separated)"
+                onChange={(e) => setEditAuthors(e.target.value)}
+                onBlur={() => {
+                  if (!persistIfChanged.authorsChanged) return;
+                  const authors = editAuthors
+                    .split(",")
+                    .map((a) => a.trim())
+                    .filter(Boolean);
+                  void (async () => {
+                    await window.audioplayer.library.updateMetadata(book.id, { authors });
+                    window.dispatchEvent(new Event("audioplayer:library-changed"));
+                  })();
+                }}
+              />
               <div className="flex items-center space-x-3">
                 <span className="bg-blue-600 text-xs px-3 py-1 rounded-full">
                   {pos?.secondsIntoChapter ? `Paused • ${playback?.rate ?? 1}x` : "Not started"}
@@ -124,7 +166,7 @@ export function DetailsModal({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Title</p>
-                  <p className="text-sm text-white">{book.metadata?.title ?? ""}</p>
+                  <p className="text-sm text-white">{editTitle.trim() || book.displayName}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Subtitle</p>
@@ -133,7 +175,7 @@ export function DetailsModal({
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Author(s)</p>
-                <p className="text-sm text-white">{book.metadata?.authors?.join(", ") ?? ""}</p>
+                <p className="text-sm text-white">{editAuthors}</p>
               </div>
 
               <div className="border-t border-gray-700 pt-3 mt-3">

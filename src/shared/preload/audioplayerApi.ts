@@ -24,6 +24,10 @@ export type AudioplayerApi = {
     clear(): Promise<void>;
     setFavorite(audiobookId: string, isFavorite: boolean): Promise<void>;
     setDuration(audiobookId: string, durationSeconds: number): Promise<void>;
+    updateMetadata(
+      audiobookId: string,
+      patch: { title?: string; authors?: string[] }
+    ): Promise<void>;
   };
   collections: {
     list(): Promise<Collection[]>;

@@ -20,10 +20,19 @@ export type PlayerState = {
   isMuted: boolean;
   currentTime: number;
   duration: number;
+  queue:
+    | {
+        collectionId: string;
+        collectionName: string;
+        audiobookIds: string[];
+        index: number;
+      }
+    | null;
 };
 
 export type PlayerActions = {
   playBook: (book: Audiobook) => Promise<void>;
+  playCollection: (collectionId: string, audiobookIds: string[]) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   play: () => Promise<void>;
   pause: () => void;
@@ -53,6 +62,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [queue, setQueue] = useState<PlayerState["queue"]>(null);
 
   const persistTimer = useRef<number | null>(null);
 
@@ -74,7 +84,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const base: PlaybackState = {
         isPlaying,
         rate,
-        position: basePosition
+        position: basePosition,
+        queue: queue
+          ? { collectionId: queue.collectionId, audiobookIds: queue.audiobookIds, index: queue.index }
+          : null
       };
 
       const mergedPosition: PlaybackPosition = {
@@ -94,7 +107,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // ignore (best-effort persistence)
       }
     },
-    [isPlaying, nowPlaying, rate]
+    [isPlaying, nowPlaying, queue, rate]
   );
 
   const ensureAudio = useCallback(() => {
@@ -164,6 +177,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const playBook = useCallback(
     async (book: Audiobook) => {
+      // Playing a single book replaces any existing queue.
+      if (queue) setQueue(null);
       // Resume from stored position for this audiobook (best-effort).
       let resume: PlaybackState | null = null;
       try {
@@ -177,8 +192,34 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       setRateState(resume?.rate ?? 1);
       await loadChapter(book, Math.max(0, Math.min(idx, book.chapters.length - 1)), seconds, true);
+      void persistState({ queue: null });
     },
-    [loadChapter]
+    [loadChapter, persistState, queue]
+  );
+
+  const playCollection = useCallback(
+    async (collectionId: string, audiobookIds: string[]) => {
+      const ids = (audiobookIds ?? []).filter(Boolean);
+      if (ids.length === 0) return;
+      // Resolve collection name best-effort.
+      let collectionName = "Collection";
+      try {
+        const list = await window.audioplayer.collections.list();
+        collectionName = list.find((c) => c.id === collectionId)?.name ?? collectionName;
+      } catch {
+        // ignore
+      }
+      const q = { collectionId, collectionName, audiobookIds: ids, index: 0 };
+      setQueue(q);
+
+      const lib = await window.audioplayer.library.list();
+      const first = lib.find((b) => b.id === ids[0]);
+      if (!first) return;
+      // Start from beginning (queue play is explicit).
+      await loadChapter(first, 0, 0, true);
+      void persistState({ queue: { collectionId, audiobookIds: ids, index: 0 } });
+    },
+    [loadChapter, persistState]
   );
 
   // Allow other parts of the UI (e.g. search dropdown) to request playback without
@@ -223,6 +264,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!book) return;
       if (cancelled) return;
 
+      // Restore queue context if present.
+      const q = last?.queue ?? null;
+      if (q && q.audiobookIds?.length) {
+        let collectionName = "Collection";
+        try {
+          const list = await window.audioplayer.collections.list();
+          collectionName = list.find((c) => c.id === q.collectionId)?.name ?? collectionName;
+        } catch {
+          // ignore
+        }
+        setQueue({ collectionId: q.collectionId, collectionName, audiobookIds: q.audiobookIds, index: q.index ?? 0 });
+      } else {
+        setQueue(null);
+      }
+
       setRateState(last?.rate ?? 1);
       await loadChapter(
         book,
@@ -239,17 +295,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // If the library changes (e.g. favoriting), refresh the nowPlaying book snapshot so the footer reflects updates.
   useEffect(() => {
     const onChanged = () => {
-      if (!nowPlaying) return;
       void (async () => {
         const list = await window.audioplayer.library.list();
-        const updated = list.find((b) => b.id === nowPlaying.book.id);
-        if (!updated) return;
-        setNowPlaying({ book: updated, chapterIndex: nowPlaying.chapterIndex });
+        if (nowPlaying) {
+          const updated = list.find((b) => b.id === nowPlaying.book.id);
+          if (!updated) {
+            // The currently playing book was removed from the library.
+            const a = ensureAudio();
+            a.pause();
+            a.src = "";
+            setIsPlaying(false);
+            setNowPlaying(null);
+            setCurrentTime(0);
+            setDuration(0);
+            setQueue(null);
+            return;
+          }
+          setNowPlaying({ book: updated, chapterIndex: nowPlaying.chapterIndex });
+        }
+
+        // If we have a queue, prune any removed audiobook ids (best-effort UI sync; persistence is handled in main).
+        if (queue?.audiobookIds?.length) {
+          const present = new Set(list.map((b) => b.id));
+          const filtered = queue.audiobookIds.filter((id) => present.has(id));
+          if (filtered.length === 0) {
+            setQueue(null);
+          } else if (filtered.length !== queue.audiobookIds.length) {
+            const removedBeforeOrAt = queue.audiobookIds
+              .slice(0, queue.index + 1)
+              .filter((id) => !present.has(id)).length;
+            let idx = Math.max(0, queue.index - removedBeforeOrAt);
+            if (idx >= filtered.length) idx = filtered.length - 1;
+            setQueue({ ...queue, audiobookIds: filtered, index: idx });
+          }
+        }
       })();
     };
     window.addEventListener("audioplayer:library-changed", onChanged);
     return () => window.removeEventListener("audioplayer:library-changed", onChanged);
-  }, [nowPlaying]);
+  }, [ensureAudio, nowPlaying, queue]);
 
   const play = useCallback(async () => {
     const a = ensureAudio();
@@ -334,18 +418,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const nextChapter = useCallback(async () => {
     if (!nowPlaying) return;
     const nextIdx = nowPlaying.chapterIndex + 1;
-    if (nextIdx >= nowPlaying.book.chapters.length) {
-      pause();
+    if (nextIdx < nowPlaying.book.chapters.length) {
+      await loadChapter(nowPlaying.book, nextIdx, 0, true);
       return;
     }
-    await loadChapter(nowPlaying.book, nextIdx, 0, true);
-  }, [loadChapter, nowPlaying, pause]);
+
+    // No next chapter: if queue has a next book, advance.
+    if (queue && queue.index < queue.audiobookIds.length - 1) {
+      const nextBookId = queue.audiobookIds[queue.index + 1];
+      const lib = await window.audioplayer.library.list();
+      const nextBook = lib.find((b) => b.id === nextBookId);
+      if (!nextBook) return;
+      const nextQueue = { ...queue, index: queue.index + 1 };
+      setQueue(nextQueue);
+      await loadChapter(nextBook, 0, 0, true);
+      void persistState({ queue: { collectionId: nextQueue.collectionId, audiobookIds: nextQueue.audiobookIds, index: nextQueue.index } });
+      return;
+    }
+
+    pause();
+  }, [loadChapter, nowPlaying, pause, persistState, queue]);
 
   const prevChapter = useCallback(async () => {
     if (!nowPlaying) return;
-    const prevIdx = Math.max(0, nowPlaying.chapterIndex - 1);
-    await loadChapter(nowPlaying.book, prevIdx, 0, true);
-  }, [loadChapter, nowPlaying]);
+    const prevIdx = nowPlaying.chapterIndex - 1;
+    if (prevIdx >= 0) {
+      await loadChapter(nowPlaying.book, prevIdx, 0, true);
+      return;
+    }
+    // At first chapter: if queue has a previous book, go back.
+    if (queue && queue.index > 0) {
+      const prevBookId = queue.audiobookIds[queue.index - 1];
+      const lib = await window.audioplayer.library.list();
+      const prevBook = lib.find((b) => b.id === prevBookId);
+      if (!prevBook) return;
+      const nextQueue = { ...queue, index: queue.index - 1 };
+      setQueue(nextQueue);
+      await loadChapter(prevBook, Math.max(0, prevBook.chapters.length - 1), 0, true);
+      void persistState({ queue: { collectionId: nextQueue.collectionId, audiobookIds: nextQueue.audiobookIds, index: nextQueue.index } });
+      return;
+    }
+    await loadChapter(nowPlaying.book, 0, 0, true);
+  }, [loadChapter, nowPlaying, persistState, queue]);
 
   // Attach audio element listeners once.
   useEffect(() => {
@@ -413,12 +527,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [isPlaying, persistState]);
 
   const state = useMemo<PlayerState>(
-    () => ({ nowPlaying, isPlaying, rate, volume, isMuted, currentTime, duration }),
-    [currentTime, duration, isMuted, isPlaying, nowPlaying, rate, volume]
+    () => ({ nowPlaying, isPlaying, rate, volume, isMuted, currentTime, duration, queue }),
+    [currentTime, duration, isMuted, isPlaying, nowPlaying, queue, rate, volume]
   );
   const actions = useMemo<PlayerActions>(
     () => ({
       playBook,
+      playCollection,
       togglePlayPause,
       play,
       pause,
@@ -435,6 +550,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       pause,
       play,
       playBook,
+      playCollection,
       prevChapter,
       seek,
       setRate,

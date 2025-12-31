@@ -4,6 +4,8 @@ import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
+const TRANSPARENT_GIF =
+  "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
 
 export function AudiobookGrid({
   books,
@@ -45,6 +47,10 @@ export function AudiobookGrid({
               e.dataTransfer.effectAllowed = "copy";
               e.dataTransfer.setData(INTERNAL_DND_BOOK_TYPE, b.id);
               e.dataTransfer.setData("text/plain", b.id);
+              // Prevent large cover-image ghost obscuring the UI.
+              const img = new Image();
+              img.src = TRANSPARENT_GIF;
+              e.dataTransfer.setDragImage(img, 0, 0);
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
             onClick={() => onPlay(b)}
@@ -75,7 +81,7 @@ export function AudiobookGrid({
                   ].join(" ")}
                   title={isDone ? "Completed" : `${Math.round(pct * 100)}%`}
                 >
-                  {isDone ? "Done" : `${Math.round(pct * 100)}%`}
+                  {isDone ? "100%" : `${Math.round(pct * 100)}%`}
                 </div>
               ) : null}
 

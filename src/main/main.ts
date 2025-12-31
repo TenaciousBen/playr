@@ -1,11 +1,13 @@
 import { app } from "electron";
 import { registerIpcHandlers } from "@/src/main/ipc/registerIpcHandlers";
 import { createMainWindow } from "@/src/main/windows/createMainWindow";
+import { migrateUserDataIfNeeded } from "@/src/main/persistence/migrateUserData";
 
 async function bootstrap() {
-  registerIpcHandlers();
-
   await app.whenReady();
+  await migrateUserDataIfNeeded();
+
+  registerIpcHandlers();
 
   createMainWindow();
 

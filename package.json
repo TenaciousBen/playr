@@ -35,8 +35,8 @@
     "vite-tsconfig-paths": "^5.0.0"
   },
   "build": {
-    "appId": "com.audioplayer.app",
-    "productName": "Audioplayer",
+    "appId": "com.playr.app",
+    "productName": "Playr",
     "icon": "assets/icon.ico",
     "artifactName": "playr.${ext}",
     "directories": {

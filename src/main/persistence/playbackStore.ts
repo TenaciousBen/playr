@@ -10,9 +10,11 @@ export type PersistedPlayback = {
   byAudiobookId: Record<AudiobookId, PlaybackState>;
   /** Most recently opened/played audiobook id (best-effort) */
   lastAudiobookId?: AudiobookId;
+  /** Persisted queue context (best-effort). */
+  queue?: PlaybackState["queue"];
 };
 
-const EMPTY: PersistedPlayback = { byAudiobookId: {}, lastAudiobookId: undefined };
+const EMPTY: PersistedPlayback = { byAudiobookId: {}, lastAudiobookId: undefined, queue: null };
 
 export async function loadPlayback(): Promise<PersistedPlayback> {
   return await readJsonFile<PersistedPlayback>(getUserDataFilePath(PLAYBACK_FILE), EMPTY);

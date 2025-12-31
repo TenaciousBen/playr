@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
+import appIcon from "@/assets/icon.png";
 
 function formatClock(seconds: number) {
   const s = Math.max(0, Math.floor(seconds));
@@ -16,6 +17,8 @@ export function PlayerFooter() {
   const book = state.nowPlaying?.book ?? null;
   const chapterIndex = state.nowPlaying?.chapterIndex ?? 0;
   const hasNextChapter = !!book && chapterIndex < book.chapters.length - 1;
+  const hasNextInQueue = !!state.queue && state.queue.index < state.queue.audiobookIds.length - 1;
+  const hasNext = hasNextChapter || hasNextInQueue;
   const isFav = !!book?.isFavorite;
   const isMuted = !!state.isMuted;
   const volumePct = Math.round((state.volume ?? 0) * 100);
@@ -38,14 +41,26 @@ export function PlayerFooter() {
             />
           ) : (
             <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center">
-              <i className="fas fa-headphones text-gray-300"></i>
+              <img src={appIcon} alt="Playr" className="w-7 h-7 opacity-90" />
             </div>
           )}
-          <div>
+          <div className="flex-1">
+            {state.queue ? (
+              <div className="flex items-center space-x-2 mb-1">
+                <div className="bg-purple-600 px-2 py-0.5 rounded text-xs font-medium">Queue</div>
+                <span className="text-xs text-gray-400">{state.queue.collectionName}</span>
+              </div>
+            ) : null}
             <h4 className="text-sm font-medium">{book ? (book.metadata?.title ?? book.displayName) : "—"}</h4>
             <p className="text-xs text-gray-400">
               {book
-                ? `${book.metadata?.authors?.join(", ") ?? ""}${book.metadata?.authors?.length ? " • " : ""}Chapter ${chapterIndex + 1}`
+                ? state.queue
+                  ? `${book.metadata?.authors?.join(", ") ?? ""}${
+                      book.metadata?.authors?.length ? " · " : ""
+                    }Book ${state.queue.index + 1} of ${state.queue.audiobookIds.length}`
+                  : `${book.metadata?.authors?.join(", ") ?? ""}${book.metadata?.authors?.length ? " • " : ""}Chapter ${
+                      chapterIndex + 1
+                    }`
                 : "Not playing"}
             </p>
           </div>
@@ -90,7 +105,7 @@ export function PlayerFooter() {
               className="text-gray-400 hover:text-white transition-colors disabled:opacity-40"
               title="Next chapter"
               onClick={() => void actions.nextChapter()}
-              disabled={!hasNextChapter}
+              disabled={!hasNext}
             >
               <i className="fas fa-step-forward"></i>
             </button>

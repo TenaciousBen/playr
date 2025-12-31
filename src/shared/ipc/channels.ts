@@ -10,6 +10,8 @@ export const IpcChannels = {
     Clear: "library:clear",
     SetFavorite: "library:set-favorite",
     SetDuration: "library:set-duration",
+    UpdateMetadata: "library:update-metadata",
+    IngestProgress: "library:ingest-progress",
     Search: "library:search",
     List: "library:list"
   },

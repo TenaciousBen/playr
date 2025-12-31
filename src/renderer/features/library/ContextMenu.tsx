@@ -6,6 +6,7 @@ export function ContextMenu({
   y,
   onClose,
   onDetails,
+  onAddToCollection,
   onRemove,
   removeLabel = "Remove from Playr",
   onRemoveFromCollection
@@ -15,6 +16,7 @@ export function ContextMenu({
   y: number;
   onClose: () => void;
   onDetails: () => void;
+  onAddToCollection?: () => void;
   onRemove: () => void;
   removeLabel?: string;
   onRemoveFromCollection?: () => void;
@@ -63,6 +65,18 @@ export function ContextMenu({
         <i className="fas fa-info-circle text-sm"></i>
         <span>Details</span>
       </button>
+      {onAddToCollection ? (
+        <button
+          onClick={() => {
+            onAddToCollection();
+            onClose();
+          }}
+          className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center space-x-3"
+        >
+          <i className="fas fa-layer-group text-sm"></i>
+          <span>Add to Collection</span>
+        </button>
+      ) : null}
       {onRemoveFromCollection ? (
         <>
           <div className="border-t border-gray-700 my-1"></div>

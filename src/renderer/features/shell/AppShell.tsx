@@ -6,6 +6,11 @@ import { DropOverlay } from "@/src/renderer/features/shell/DropOverlay";
 import { SearchDropdown } from "@/src/renderer/features/search/SearchDropdown";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { Collection } from "@/src/shared/models/collection";
+import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
+import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
+import appIcon from "@/assets/icon.png";
+
+const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
 
 function NavItem({
   to,
@@ -36,6 +41,7 @@ function NavItem({
 export function AppShell() {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [collectionHits, setCollectionHits] = useState<Array<{ id: string; name: string; count: number }>>([]);
   const [authorHits, setAuthorHits] = useState<Array<{ name: string; count: number }>>([]);
   const [titleHits, setTitleHits] = useState<Audiobook[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -43,10 +49,57 @@ export function AppShell() {
   const [addingCollection, setAddingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
+  const [collectionMenuOpen, setCollectionMenuOpen] = useState(false);
+  const [collectionMenuPos, setCollectionMenuPos] = useState({ x: 0, y: 0 });
+  const [collectionMenuId, setCollectionMenuId] = useState<string | null>(null);
+  const [confirmRemoveCollectionOpen, setConfirmRemoveCollectionOpen] = useState(false);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [ingest, setIngest] = useState<{
+    active: boolean;
+    totalFiles?: number;
+    countDone: number;
+    lastName?: string;
+  }>({ active: false, totalFiles: undefined, countDone: 0, lastName: undefined });
   const location = useLocation();
   const navigate = useNavigate();
 
   const showFooter = useMemo(() => location.pathname !== "/settings", [location.pathname]);
+
+  React.useEffect(() => {
+    let lastLibraryRefresh = 0;
+    const onProgress = (e: Event) => {
+      const detail = (e as CustomEvent).detail as any;
+      if (!detail || typeof detail.type !== "string") return;
+      if (detail.type === "started") {
+        setIngest({ active: true, totalFiles: undefined, countDone: 0, lastName: undefined });
+      } else if (detail.type === "scanned") {
+        setIngest((s) => ({ ...s, active: true, totalFiles: detail.totalFiles, countDone: s.countDone }));
+      } else if (detail.type === "book") {
+        setIngest((s) => ({
+          ...s,
+          active: true,
+          totalFiles: detail.totalFiles ?? s.totalFiles,
+          countDone: detail.countDone ?? s.countDone,
+          lastName: detail.displayName ?? s.lastName
+        }));
+        const now = Date.now();
+        if (now - lastLibraryRefresh > 500) {
+          lastLibraryRefresh = now;
+          window.dispatchEvent(new Event("audioplayer:library-changed"));
+        }
+      } else if (detail.type === "saved") {
+        // Nudge views to refresh.
+        window.dispatchEvent(new Event("audioplayer:library-changed"));
+      } else if (detail.type === "done") {
+        window.dispatchEvent(new Event("audioplayer:library-changed"));
+        setIngest((s) => ({ ...s, active: false }));
+      } else if (detail.type === "error") {
+        setIngest((s) => ({ ...s, active: false }));
+      }
+    };
+    window.addEventListener("audioplayer:ingest-progress", onProgress);
+    return () => window.removeEventListener("audioplayer:ingest-progress", onProgress);
+  }, []);
 
   const onDroppedFiles = useCallback(
     async (files: File[]) => {
@@ -63,6 +116,7 @@ export function AppShell() {
       const q = search.trim();
       if (!q) {
         if (!alive) return;
+        setCollectionHits([]);
         setAuthorHits([]);
         setTitleHits([]);
         return;
@@ -80,9 +134,10 @@ export function AppShell() {
       const qq = q.toLowerCase();
       const counts = new Map<string, number>();
       for (const b of lib) {
-        for (const a of b.metadata?.authors ?? []) {
-          if (a.toLowerCase().includes(qq)) {
-            counts.set(a, (counts.get(a) ?? 0) + 1);
+        for (const a of (b.metadata?.authors ?? []) as any[]) {
+          const name = String(a ?? "");
+          if (name.toLowerCase().includes(qq)) {
+            counts.set(name, (counts.get(name) ?? 0) + 1);
           }
         }
       }
@@ -100,11 +155,25 @@ export function AppShell() {
       if (!alive) return;
 
       const titlesOnly = results.filter((b) => {
-        const title = (b.metadata?.title ?? b.displayName).toLowerCase();
-        const subtitle = (b.metadata?.subtitle ?? "").toLowerCase();
+        const title = String(b.metadata?.title ?? b.displayName ?? "").toLowerCase();
+        const subtitle = String(b.metadata?.subtitle ?? "").toLowerCase();
         return title.includes(qq) || subtitle.includes(qq);
       });
 
+      // 3) Collection matches: compute from collections list
+      let colls: Collection[] = [];
+      try {
+        colls = await window.audioplayer.collections.list();
+      } catch {
+        colls = [];
+      }
+      if (!alive) return;
+      const collectionMatches = colls
+        .filter((c) => c.name.toLowerCase().includes(qq))
+        .map((c) => ({ id: c.id, name: c.name, count: c.audiobookIds.length }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setCollectionHits(collectionMatches);
       setAuthorHits(authors);
       setTitleHits(titlesOnly);
     })();
@@ -131,6 +200,43 @@ export function AppShell() {
   }, []);
 
   React.useEffect(() => {
+    const onChanged = () => {
+      void (async () => {
+        const list = await window.audioplayer.collections.list();
+        setCollections(list);
+      })();
+    };
+    window.addEventListener("audioplayer:collections-changed", onChanged);
+    return () => window.removeEventListener("audioplayer:collections-changed", onChanged);
+  }, []);
+
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const s = await window.audioplayer.settings.get();
+        if (alive) setSettings(s);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const onChanged = () => {
+      void (async () => {
+        const s = await window.audioplayer.settings.get();
+        setSettings(s);
+      })();
+    };
+    window.addEventListener("audioplayer:settings-changed", onChanged);
+    return () => window.removeEventListener("audioplayer:settings-changed", onChanged);
+  }, []);
+
+  React.useEffect(() => {
     const clear = () => setDragOverCollectionId(null);
     document.addEventListener("dragend", clear);
     document.addEventListener("drop", clear);
@@ -154,6 +260,31 @@ export function AppShell() {
     [collections]
   );
 
+  const openCollectionMenu = useCallback((e: React.MouseEvent, collectionId: string) => {
+    e.preventDefault();
+    setCollectionMenuId(collectionId);
+    setCollectionMenuPos({ x: e.clientX, y: e.clientY });
+    setCollectionMenuOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!collectionMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("#collections-context-menu")) return;
+      setCollectionMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCollectionMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [collectionMenuOpen]);
+
   return (
     <PlayerProvider>
       <div id="app-container" className="h-screen w-screen flex flex-col">
@@ -162,8 +293,8 @@ export function AppShell() {
         {/* Header */}
         <header className="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <i className="fas fa-headphones text-blue-500 text-2xl"></i>
-            <h1 className="text-xl font-semibold">Audioplayer</h1>
+            <img src={appIcon} alt="Playr" className="w-7 h-7" />
+            <h1 className="text-xl font-semibold">Playr</h1>
           </div>
 
           {/* Search Bar */}
@@ -182,6 +313,7 @@ export function AppShell() {
             <SearchDropdown
               open={searchOpen && search.trim().length > 0}
               query={search.trim()}
+              collectionHits={collectionHits}
               authorHits={authorHits}
               titleHits={titleHits}
               onClose={() => setSearchOpen(false)}
@@ -191,6 +323,10 @@ export function AppShell() {
               }}
               onBrowseLibrary={() => {
                 navigate("/library");
+                setSearchOpen(false);
+              }}
+              onSelectCollection={(collectionId) => {
+                navigate(`/collections/${encodeURIComponent(collectionId)}`);
                 setSearchOpen(false);
               }}
               onSelectAuthor={(name) => {
@@ -217,11 +353,39 @@ export function AppShell() {
 
           {/* View Options (not wired yet) */}
           <div className="flex items-center space-x-2">
-            <button className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors">
-              <i className="fas fa-th-large text-gray-300"></i>
+            <button
+              className={[
+                "p-2 rounded-lg transition-colors",
+                settings.viewMode === "grid" ? "bg-gray-700" : "hover:bg-gray-700"
+              ].join(" ")}
+              title="Grid view"
+              onClick={() => {
+                void (async () => {
+                  const next: UserSettings = { ...settings, viewMode: "grid" };
+                  setSettings(next);
+                  await window.audioplayer.settings.set(next);
+                  window.dispatchEvent(new Event("audioplayer:settings-changed"));
+                })();
+              }}
+            >
+              <i className={`fas fa-th-large ${settings.viewMode === "grid" ? "text-blue-500" : "text-gray-400"}`}></i>
             </button>
-            <button className="p-2 hover:bg-gray-700 rounded-lg transition-colors">
-              <i className="fas fa-list text-gray-400"></i>
+            <button
+              className={[
+                "p-2 rounded-lg transition-colors",
+                settings.viewMode === "list" ? "bg-gray-700" : "hover:bg-gray-700"
+              ].join(" ")}
+              title="List view"
+              onClick={() => {
+                void (async () => {
+                  const next: UserSettings = { ...settings, viewMode: "list" };
+                  setSettings(next);
+                  await window.audioplayer.settings.set(next);
+                  window.dispatchEvent(new Event("audioplayer:settings-changed"));
+                })();
+              }}
+            >
+              <i className={`fas fa-list ${settings.viewMode === "list" ? "text-blue-500" : "text-gray-400"}`}></i>
             </button>
           </div>
         </header>
@@ -323,10 +487,16 @@ export function AppShell() {
                           : "text-gray-300 hover:bg-gray-700"
                       ].join(" ")}
                       onClick={() => navigate(`/collections/${encodeURIComponent(c.id)}`)}
-                      onDragEnter={() => setDragOverCollectionId(c.id)}
+                      onContextMenu={(e) => openCollectionMenu(e, c.id)}
+                      onDragEnter={(e) => {
+                        const types = Array.from(e.dataTransfer?.types ?? []);
+                        if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
+                        e.preventDefault();
+                        setDragOverCollectionId(c.id);
+                      }}
                       onDragOver={(e) => {
-                        const id = e.dataTransfer.getData("application/x-playr-audiobook-id");
-                        if (!id) return;
+                        const types = Array.from(e.dataTransfer?.types ?? []);
+                        if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "copy";
                         setDragOverCollectionId(c.id);
@@ -335,7 +505,7 @@ export function AppShell() {
                         setDragOverCollectionId((prev) => (prev === c.id ? null : prev));
                       }}
                       onDrop={(e) => {
-                        const id = e.dataTransfer.getData("application/x-playr-audiobook-id");
+                        const id = e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE);
                         if (!id) return;
                         e.preventDefault();
                         setDragOverCollectionId(null);
@@ -361,6 +531,26 @@ export function AppShell() {
 
           {/* Feature slot */}
           <div className="flex-1 overflow-hidden flex">
+            {ingest.active ? (
+              <div className="absolute top-[64px] left-64 right-0 z-[150] px-6 pt-4 pointer-events-none">
+                <div className="bg-gray-800/90 border border-gray-700 rounded-lg px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <i className="fas fa-spinner fa-spin text-blue-400"></i>
+                    <div className="text-sm text-gray-200">
+                      Importing…{" "}
+                      <span className="text-gray-400">
+                        {typeof ingest.totalFiles === "number"
+                          ? `${ingest.countDone}/${ingest.totalFiles}`
+                          : `${ingest.countDone}`}
+                      </span>
+                      {ingest.lastName ? (
+                        <span className="text-gray-500"> · {ingest.lastName}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <Outlet />
           </div>
         </main>
@@ -368,6 +558,56 @@ export function AppShell() {
         {/* Keep engine alive even when UI hidden */}
         {showFooter ? <PlayerFooter /> : null}
       </div>
+
+      {/* Collections context menu */}
+      {collectionMenuOpen ? (
+        <div
+          id="collections-context-menu"
+          className="fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-2 z-[220] min-w-[180px]"
+          style={{
+            left: Math.max(8, Math.min(collectionMenuPos.x, window.innerWidth - 200)),
+            top: Math.max(8, Math.min(collectionMenuPos.y, window.innerHeight - 120))
+          }}
+        >
+          <button
+            className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors flex items-center space-x-3"
+            onClick={() => {
+              setCollectionMenuOpen(false);
+              setConfirmRemoveCollectionOpen(true);
+            }}
+          >
+            <i className="fas fa-trash text-sm"></i>
+            <span>Remove Collection</span>
+          </button>
+        </div>
+      ) : null}
+
+      <ConfirmModal
+        open={confirmRemoveCollectionOpen}
+        title="Remove collection?"
+        message={
+          <div>
+            This will remove the collection from Playr. Audiobooks in your library will not be deleted.
+          </div>
+        }
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive={true}
+        onClose={() => setConfirmRemoveCollectionOpen(false)}
+        onConfirm={() => {
+          const id = collectionMenuId;
+          if (!id) return;
+          void (async () => {
+            await window.audioplayer.collections.remove(id);
+            window.dispatchEvent(new Event("audioplayer:collections-changed"));
+            setConfirmRemoveCollectionOpen(false);
+            // If user is currently viewing this collection, bounce to library.
+            if (location.pathname.startsWith(`/collections/${encodeURIComponent(id)}`)) {
+              navigate("/library");
+            }
+          })();
+        }}
+      />
     </PlayerProvider>
   );
 }

@@ -5,7 +5,10 @@ import { ContextMenu } from "@/src/renderer/features/library/ContextMenu";
 import { DetailsModal } from "@/src/renderer/features/library/DetailsModal";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 import { AudiobookGrid } from "@/src/renderer/features/audiobooks/AudiobookGrid";
+import { AudiobookList } from "@/src/renderer/features/audiobooks/AudiobookList";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
+import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
+import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
 
 function rangeLabel(r: UserSettings["recentlyAddedRange"]) {
   return r === "today"
@@ -49,6 +52,8 @@ export function LibraryFeature({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsBook, setDetailsBook] = useState<Audiobook | null>(null);
   const [detailsPlayback, setDetailsPlayback] = useState<PlaybackState | null>(null);
+  const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
+  const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -77,6 +82,17 @@ export function LibraryFeature({
     return () => {
       alive = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const onChanged = () => {
+      void (async () => {
+        const s = await window.audioplayer.settings.get();
+        setSettings(s);
+      })();
+    };
+    window.addEventListener("audioplayer:settings-changed", onChanged);
+    return () => window.removeEventListener("audioplayer:settings-changed", onChanged);
   }, []);
 
   useEffect(() => {
@@ -139,6 +155,17 @@ export function LibraryFeature({
     }
     return books;
   }, [books, mode, playbackById, settings.recentlyAddedRange]);
+
+  const playbackSecondsById = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [id, st] of Object.entries(playbackById)) out[id] = st?.position?.secondsIntoChapter ?? 0;
+    return out;
+  }, [playbackById]);
+
+  const sortedShown = useMemo(
+    () => sortAudiobooks(shown, settings.sortBy, playbackSecondsById),
+    [playbackSecondsById, settings.sortBy, shown]
+  );
 
   const openDetails = useCallback(
     async (id: string) => {
@@ -222,6 +249,7 @@ export function LibraryFeature({
                               setSettings(next);
                               setTimeMenuOpen(false);
                               await window.audioplayer.settings.set(next);
+                              window.dispatchEvent(new Event("audioplayer:settings-changed"));
                             })();
                           }}
                         >
@@ -234,41 +262,72 @@ export function LibraryFeature({
               ) : null}
             </div>
           ) : null}
-          <select className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-            {mode === "recent" ? <option>Sort by Date Added</option> : <option>Sort by Title</option>}
-            <option>Sort by Title</option>
-            <option>Sort by Author</option>
-            <option>Sort by Date Added</option>
-            <option>Sort by Progress</option>
+          <select
+            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={settings.sortBy}
+            onChange={(e) => {
+              void (async () => {
+                const next: UserSettings = { ...settings, sortBy: e.target.value as UserSettings["sortBy"] };
+                setSettings(next);
+                await window.audioplayer.settings.set(next);
+                window.dispatchEvent(new Event("audioplayer:settings-changed"));
+              })();
+            }}
+          >
+            <option value="title">Sort by Title</option>
+            <option value="author">Sort by Author</option>
+            <option value="dateAdded">Sort by Date Added</option>
+            <option value="progress">Sort by Progress</option>
+            <option value="duration">Sort by Duration</option>
           </select>
         </div>
       </div>
 
-      {shown.length === 0 && !loading ? (
+      {sortedShown.length === 0 && !loading ? (
         <div className="border border-gray-700 bg-gray-800/40 rounded-xl p-8 text-center">
           <div className="text-xl font-semibold">Your library is empty</div>
           <div className="text-gray-400 mt-2">Drag and drop audio files or a folder here to add an audiobook.</div>
         </div>
       ) : (
-        <AudiobookGrid
-          books={shown}
-          subtitle={(b) => `${b.chapters.length} file(s)`}
-          onPlay={(b) => void player.actions.playBook(b)}
-          onOpenDetails={(b) => void openDetails(b.id)}
-          onContextMenu={(e, b) => {
-            e.preventDefault();
-            setSelectedId(b.id);
-            setMenuPos({ x: e.clientX, y: e.clientY });
-            setMenuOpen(true);
-          }}
-          onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
-          playbackById={Object.fromEntries(
-            Object.entries(playbackById).map(([id, st]) => [
-              id,
-              st ? { secondsIntoChapter: st.position?.secondsIntoChapter } : null
-            ])
-          )}
-        />
+        settings.viewMode === "list" ? (
+          <AudiobookList
+            books={sortedShown}
+            onPlay={(b) => void player.actions.playBook(b)}
+            onContextMenu={(e, b) => {
+              e.preventDefault();
+              setSelectedId(b.id);
+              setMenuPos({ x: e.clientX, y: e.clientY });
+              setMenuOpen(true);
+            }}
+            onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            playbackById={Object.fromEntries(
+              Object.entries(playbackById).map(([id, st]) => [
+                id,
+                st ? { secondsIntoChapter: st.position?.secondsIntoChapter } : null
+              ])
+            )}
+          />
+        ) : (
+          <AudiobookGrid
+            books={sortedShown}
+            subtitle={(b) => `${b.chapters.length} file(s)`}
+            onPlay={(b) => void player.actions.playBook(b)}
+            onOpenDetails={(b) => void openDetails(b.id)}
+            onContextMenu={(e, b) => {
+              e.preventDefault();
+              setSelectedId(b.id);
+              setMenuPos({ x: e.clientX, y: e.clientY });
+              setMenuOpen(true);
+            }}
+            onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            playbackById={Object.fromEntries(
+              Object.entries(playbackById).map(([id, st]) => [
+                id,
+                st ? { secondsIntoChapter: st.position?.secondsIntoChapter } : null
+              ])
+            )}
+          />
+        )
       )}
 
       <ContextMenu
@@ -278,6 +337,12 @@ export function LibraryFeature({
         onClose={() => setMenuOpen(false)}
         onDetails={() => {
           if (selectedId) void openDetails(selectedId);
+        }}
+        onAddToCollection={() => {
+          if (!selectedId) return;
+          const b = books.find((x) => x.id === selectedId) ?? null;
+          setAddToCollectionBook(b);
+          setAddToCollectionOpen(true);
         }}
         onRemove={() => {
           if (selectedId) void removeBook(selectedId);
@@ -289,6 +354,12 @@ export function LibraryFeature({
         book={detailsBook}
         playback={detailsPlayback}
         onClose={() => setDetailsOpen(false)}
+      />
+
+      <AddToCollectionModal
+        open={addToCollectionOpen}
+        book={addToCollectionBook}
+        onClose={() => setAddToCollectionOpen(false)}
       />
     </section>
   );

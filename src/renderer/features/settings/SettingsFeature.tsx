@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserSettings } from "@/src/shared/models/userSettings";
 import { DEFAULT_USER_SETTINGS } from "@/src/shared/models/userSettings";
+import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 
 function recentlyAddedLabel(r: UserSettings["recentlyAddedRange"]) {
   return r === "today"
@@ -18,6 +19,8 @@ export function SettingsFeature() {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -39,6 +42,7 @@ export function SettingsFeature() {
     setSaving(true);
     try {
       await window.audioplayer.settings.set(next);
+      window.dispatchEvent(new Event("audioplayer:settings-changed"));
     } finally {
       setSaving(false);
     }
@@ -50,13 +54,7 @@ export function SettingsFeature() {
   );
 
   const onEmptyLibrary = useCallback(async () => {
-    const ok = window.confirm(
-      "Are you sure you want to empty your library?\n\nThis action cannot be undone and will remove all audiobooks, progress, and bookmarks."
-    );
-    if (!ok) return;
-    await window.audioplayer.library.clear();
-    window.dispatchEvent(new Event("audioplayer:library-changed"));
-    window.alert("Library emptied successfully.");
+    setConfirmClearOpen(true);
   }, []);
 
   return (
@@ -64,7 +62,7 @@ export function SettingsFeature() {
       {/* Settings Header */}
       <div className="bg-gray-800 border-b border-gray-700 px-8 py-6">
         <h2 className="text-2xl font-bold">Settings</h2>
-        <p className="text-gray-400 mt-1">Configure your Audioplayer preferences</p>
+        <p className="text-gray-400 mt-1">Configure your Playr preferences</p>
       </div>
 
       {/* Settings Content */}
@@ -77,6 +75,49 @@ export function SettingsFeature() {
           </div>
 
           <div className="space-y-6">
+            <div className="flex items-start justify-between py-4">
+              <div className="flex-1">
+                <h4 className="text-base font-medium text-white mb-1">Default View</h4>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Choose whether audiobook pages use a grid or list view by default.
+                </p>
+              </div>
+              <div className="ml-8 flex-shrink-0">
+                <select
+                  className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  value={settings.viewMode}
+                  disabled={loading || saving}
+                  onChange={(e) => void setAndPersist({ ...settings, viewMode: e.target.value as UserSettings["viewMode"] })}
+                >
+                  <option value="grid">Grid</option>
+                  <option value="list">List</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-start justify-between py-4">
+              <div className="flex-1">
+                <h4 className="text-base font-medium text-white mb-1">Default Sort</h4>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Choose how audiobooks are sorted by default across views.
+                </p>
+              </div>
+              <div className="ml-8 flex-shrink-0">
+                <select
+                  className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  value={settings.sortBy}
+                  disabled={loading || saving}
+                  onChange={(e) => void setAndPersist({ ...settings, sortBy: e.target.value as UserSettings["sortBy"] })}
+                >
+                  <option value="title">Title</option>
+                  <option value="author">Author</option>
+                  <option value="dateAdded">Date Added</option>
+                  <option value="progress">Progress</option>
+                  <option value="duration">Duration</option>
+                </select>
+              </div>
+            </div>
+
             <div className="flex items-start justify-between py-4">
               <div className="flex-1">
                 <h4 className="text-base font-medium text-white mb-1">Recently Added Range</h4>
@@ -118,7 +159,7 @@ export function SettingsFeature() {
                 <button
                   onClick={() => void onEmptyLibrary()}
                   className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-60"
-                  disabled={loading}
+                  disabled={loading || clearing}
                 >
                   Empty Library
                 </button>
@@ -139,7 +180,7 @@ export function SettingsFeature() {
               <div className="flex-1">
                 <h4 className="text-base font-medium text-white mb-1">Allow Collection of Statistics</h4>
                 <p className="text-sm text-gray-400 leading-relaxed">
-                  Help improve Audioplayer by sharing anonymous usage statistics. This includes playback patterns,
+                  Help improve Playr by sharing anonymous usage statistics. This includes playback patterns,
                   feature usage, and performance metrics. No personal data or audiobook content is collected.
                 </p>
               </div>
@@ -184,6 +225,39 @@ export function SettingsFeature() {
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={confirmClearOpen}
+        title="Empty library?"
+        message={
+          <div className="space-y-2">
+            <div>This will remove all audiobooks from your library.</div>
+            <div className="text-gray-400">
+              Playback progress (including the currently playing queue/book) will be cleared as well.
+            </div>
+          </div>
+        }
+        confirmLabel={clearing ? "Emptying…" : "Empty Library"}
+        cancelLabel="Cancel"
+        destructive={true}
+        onClose={() => {
+          if (clearing) return;
+          setConfirmClearOpen(false);
+        }}
+        onConfirm={() => {
+          if (clearing) return;
+          void (async () => {
+            setClearing(true);
+            try {
+              await window.audioplayer.library.clear();
+              window.dispatchEvent(new Event("audioplayer:library-changed"));
+            } finally {
+              setClearing(false);
+              setConfirmClearOpen(false);
+            }
+          })();
+        }}
+      />
     </section>
   );
 }
