@@ -10,6 +10,7 @@ import { AudiobookList } from "@/src/renderer/features/audiobooks/AudiobookList"
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
 import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
+import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 
 function formatHoursMinutes(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -54,6 +55,8 @@ export function AuthorFeature() {
   const [creating, setCreating] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
+  const [collectionMenuOpen, setCollectionMenuOpen] = useState(false);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!author) return;
@@ -78,6 +81,24 @@ export function AuthorFeature() {
     window.addEventListener("audioplayer:library-changed", onChanged);
     return () => window.removeEventListener("audioplayer:library-changed", onChanged);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!collectionMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("#author-collection-menu")) return;
+      setCollectionMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCollectionMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [collectionMenuOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -139,9 +160,57 @@ export function AuthorFeature() {
     return out;
   }, [playbackById]);
 
+  const authorKey = useMemo(() => author.toLowerCase(), [author]);
+  const authorOrderIds = useMemo(() => settings.authorOrders?.[authorKey] ?? [], [authorKey, settings.authorOrders]);
+
   const sortedBooks = useMemo(
-    () => sortAudiobooks(books, settings.sortBy, playbackSecondsById),
-    [books, playbackSecondsById, settings.sortBy]
+    () => sortAudiobooks(books, settings.sortBy, playbackSecondsById, authorOrderIds),
+    [authorOrderIds, books, playbackSecondsById, settings.sortBy]
+  );
+
+  const applyReorderPreview = useCallback(
+    (dragId: string, targetId: string) => {
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][author] preview", { authorKey, dragId, targetId });
+      const base = authorOrderIds.length ? authorOrderIds : sortedBooks.map((b) => b.id);
+      const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      setSettings((s) => ({
+        ...s,
+        sortBy: "userOrder",
+        authorOrders: { ...(s.authorOrders ?? {}), [authorKey]: ids }
+      }));
+    },
+    [authorKey, authorOrderIds, sortedBooks]
+  );
+
+  const commitReorder = useCallback(
+    (dragId: string, targetId: string) => {
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][author] commit", { authorKey, dragId, targetId });
+      const base = authorOrderIds.length ? authorOrderIds : sortedBooks.map((b) => b.id);
+      const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      void (async () => {
+        const next: UserSettings = {
+          ...settings,
+          sortBy: "userOrder",
+          authorOrders: { ...(settings.authorOrders ?? {}), [authorKey]: ids }
+        };
+        setSettings(next);
+        await window.audioplayer.settings.set(next);
+        window.dispatchEvent(new Event("audioplayer:settings-changed"));
+      })();
+    },
+    [authorKey, authorOrderIds, settings, sortedBooks]
   );
 
   const openDetails = useCallback(
@@ -223,30 +292,37 @@ export function AuthorFeature() {
           <p className="text-gray-400 mt-1">{subtitle}</p>
         </div>
         <div className="flex items-center space-x-3">
-          <button
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-60"
-            disabled={creating || books.length === 0}
-            onClick={() => {
-              if (books.length === 0) return;
-              void (async () => {
-                setCreating(true);
-                try {
-                  const name = `Books by ${author}`;
-                  const created = await window.audioplayer.collections.create(name);
-                  await window.audioplayer.collections.setBooks(
-                    created.id,
-                    books.map((b) => b.id)
-                  );
-                  window.dispatchEvent(new Event("audioplayer:collections-changed"));
-                  navigate(`/collections/${encodeURIComponent(created.id)}`);
-                } finally {
-                  setCreating(false);
-                }
-              })();
-            }}
-          >
-            <i className="fas fa-plus mr-2"></i>Create Collection
-          </button>
+          <div className="relative">
+            <button
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-60 flex items-center space-x-2"
+              disabled={creating || books.length === 0}
+              onClick={() => setCollectionMenuOpen((v) => !v)}
+              title="Collection actions"
+            >
+              <i className="fas fa-plus"></i>
+              <span>Create Collection</span>
+              <i className="fas fa-chevron-down text-xs opacity-90"></i>
+            </button>
+
+            {collectionMenuOpen ? (
+              <div
+                id="author-collection-menu"
+                className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+              >
+                <button
+                  className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 transition-colors flex items-center space-x-3"
+                  onClick={() => {
+                    setCollectionMenuOpen(false);
+                    setAddToCollectionBook(null);
+                    setAddToCollectionOpen(true);
+                  }}
+                >
+                  <i className="fas fa-layer-group text-xs"></i>
+                  <span>Add to existing collection…</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
           <select
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={settings.sortBy}
@@ -259,6 +335,7 @@ export function AuthorFeature() {
               })();
             }}
           >
+            <option value="userOrder">Sort by User Order</option>
             <option value="title">Sort by Title</option>
             <option value="author">Sort by Author</option>
             <option value="dateAdded">Sort by Date Added</option>
@@ -313,6 +390,8 @@ export function AuthorFeature() {
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -333,6 +412,8 @@ export function AuthorFeature() {
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -360,7 +441,8 @@ export function AuthorFeature() {
           setAddToCollectionOpen(true);
         }}
         onRemove={() => {
-          if (selectedId) void removeBook(selectedId);
+          if (!selectedId) return;
+          setConfirmRemoveOpen(true);
         }}
       />
 
@@ -373,8 +455,36 @@ export function AuthorFeature() {
 
       <AddToCollectionModal
         open={addToCollectionOpen}
-        book={addToCollectionBook}
+        books={addToCollectionBook ? [addToCollectionBook] : books}
         onClose={() => setAddToCollectionOpen(false)}
+      />
+
+      <ConfirmModal
+        open={confirmRemoveOpen}
+        title="Remove from Playr?"
+        message={
+          <div className="space-y-2">
+            <div>
+              This will remove{" "}
+              <span className="font-semibold text-white">
+                {selectedId ? books.find((b) => b.id === selectedId)?.metadata?.title ?? books.find((b) => b.id === selectedId)?.displayName ?? "this audiobook" : "this audiobook"}
+              </span>{" "}
+              from your library.
+            </div>
+            <div className="text-gray-400">It will also be removed from any collections and queues.</div>
+          </div>
+        }
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive={true}
+        onClose={() => setConfirmRemoveOpen(false)}
+        onConfirm={() => {
+          if (!selectedId) return;
+          void (async () => {
+            await removeBook(selectedId);
+            setConfirmRemoveOpen(false);
+          })();
+        }}
       />
     </section>
   );

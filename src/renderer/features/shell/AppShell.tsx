@@ -48,6 +48,8 @@ export function AppShell() {
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [addingCollection, setAddingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
+  const [renamingCollectionId, setRenamingCollectionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
   const [collectionMenuOpen, setCollectionMenuOpen] = useState(false);
   const [collectionMenuPos, setCollectionMenuPos] = useState({ x: 0, y: 0 });
@@ -260,6 +262,15 @@ export function AppShell() {
     [collections]
   );
 
+  const commitRenameCollection = useCallback(async (collectionId: string, nextName: string) => {
+    const name = nextName.trim();
+    if (!name) return;
+    await window.audioplayer.collections.rename(collectionId, name);
+    window.dispatchEvent(new Event("audioplayer:collections-changed"));
+    setRenamingCollectionId(null);
+    setRenameValue("");
+  }, []);
+
   const openCollectionMenu = useCallback((e: React.MouseEvent, collectionId: string) => {
     e.preventDefault();
     setCollectionMenuId(collectionId);
@@ -302,7 +313,10 @@ export function AppShell() {
             <div className="relative">
               <input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setSearchOpen(true);
+                }}
                 placeholder="Search audiobooks, authors, titles..."
                 onFocus={() => setSearchOpen(true)}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 pl-10 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -442,6 +456,25 @@ export function AppShell() {
                       placeholder="New collection name..."
                       className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-400"
                       autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (!newCollectionName.trim()) return;
+                          void (async () => {
+                            const created = await window.audioplayer.collections.create(newCollectionName);
+                            const list = await window.audioplayer.collections.list();
+                            setCollections(list);
+                            setAddingCollection(false);
+                            setNewCollectionName("");
+                            navigate(`/collections/${encodeURIComponent(created.id)}`);
+                          })();
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setAddingCollection(false);
+                          setNewCollectionName("");
+                        }
+                      }}
                     />
                     <button
                       className="text-green-500 hover:text-green-400 transition-colors ml-2"
@@ -478,45 +511,88 @@ export function AppShell() {
                   <div className="p-2 text-gray-500 text-sm">No collections</div>
                 ) : (
                   collections.map((c) => (
-                    <div
-                      key={c.id}
-                      className={[
-                        "flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer",
-                        dragOverCollectionId === c.id
-                          ? "bg-blue-600 text-white"
-                          : "text-gray-300 hover:bg-gray-700"
-                      ].join(" ")}
-                      onClick={() => navigate(`/collections/${encodeURIComponent(c.id)}`)}
-                      onContextMenu={(e) => openCollectionMenu(e, c.id)}
-                      onDragEnter={(e) => {
-                        const types = Array.from(e.dataTransfer?.types ?? []);
-                        if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
-                        e.preventDefault();
-                        setDragOverCollectionId(c.id);
-                      }}
-                      onDragOver={(e) => {
-                        const types = Array.from(e.dataTransfer?.types ?? []);
-                        if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "copy";
-                        setDragOverCollectionId(c.id);
-                      }}
-                      onDragLeave={() => {
-                        setDragOverCollectionId((prev) => (prev === c.id ? null : prev));
-                      }}
-                      onDrop={(e) => {
-                        const id = e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE);
-                        if (!id) return;
-                        e.preventDefault();
-                        setDragOverCollectionId(null);
-                        void addBookToCollection(c.id, id);
-                      }}
-                    >
-                      <span className="text-sm">{c.name}</span>
-                      <span className={dragOverCollectionId === c.id ? "text-xs text-white/90" : "text-xs text-gray-500"}>
-                        {c.audiobookIds.length}
-                      </span>
-                    </div>
+                    renamingCollectionId === c.id ? (
+                      <div key={c.id} className="flex items-center p-2 bg-gray-700 rounded-lg mb-1">
+                        <input
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          placeholder="Collection name..."
+                          className="flex-1 bg-transparent text-white text-sm focus:outline-none placeholder-gray-400"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void commitRenameCollection(c.id, renameValue);
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setRenamingCollectionId(null);
+                              setRenameValue("");
+                            }
+                          }}
+                        />
+                        <button
+                          className="text-green-500 hover:text-green-400 transition-colors ml-2 disabled:opacity-60"
+                          title="Save"
+                          onClick={() => void commitRenameCollection(c.id, renameValue)}
+                          disabled={!renameValue.trim()}
+                        >
+                          <i className="fas fa-check text-sm"></i>
+                        </button>
+                        <button
+                          className="text-red-500 hover:text-red-400 transition-colors ml-2"
+                          title="Cancel"
+                          onClick={() => {
+                            setRenamingCollectionId(null);
+                            setRenameValue("");
+                          }}
+                        >
+                          <i className="fas fa-times text-sm"></i>
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        key={c.id}
+                        className={[
+                          "flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer",
+                          dragOverCollectionId === c.id ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
+                        ].join(" ")}
+                        onClick={() => navigate(`/collections/${encodeURIComponent(c.id)}`)}
+                        onDoubleClick={() => {
+                          setRenamingCollectionId(c.id);
+                          setRenameValue(c.name);
+                        }}
+                        onContextMenu={(e) => openCollectionMenu(e, c.id)}
+                        onDragEnter={(e) => {
+                          const types = Array.from(e.dataTransfer?.types ?? []);
+                          if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
+                          e.preventDefault();
+                          setDragOverCollectionId(c.id);
+                        }}
+                        onDragOver={(e) => {
+                          const types = Array.from(e.dataTransfer?.types ?? []);
+                          if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "copy";
+                          setDragOverCollectionId(c.id);
+                        }}
+                        onDragLeave={() => {
+                          setDragOverCollectionId((prev) => (prev === c.id ? null : prev));
+                        }}
+                        onDrop={(e) => {
+                          const id = e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE);
+                          if (!id) return;
+                          e.preventDefault();
+                          setDragOverCollectionId(null);
+                          void addBookToCollection(c.id, id);
+                        }}
+                      >
+                        <span className="text-sm">{c.name}</span>
+                        <span className={dragOverCollectionId === c.id ? "text-xs text-white/90" : "text-xs text-gray-500"}>
+                          {c.audiobookIds.length}
+                        </span>
+                      </div>
+                    )
                   ))
                 )}
               </div>

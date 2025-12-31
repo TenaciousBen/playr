@@ -4,8 +4,23 @@ import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
+const INTERNAL_REORDER_TYPE = "application/x-playr-reorder-audiobook";
 const TRANSPARENT_GIF =
   "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+
+function debugReorderEnabled() {
+  try {
+    return localStorage.getItem("debugReorder") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function logReorder(...args: any[]) {
+  if (!debugReorderEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.log("[REORDER]", ...args);
+}
 
 export function AudiobookGrid({
   books,
@@ -14,7 +29,9 @@ export function AudiobookGrid({
   onOpenDetails,
   onContextMenu,
   onToggleFavorite,
-  playbackById
+  playbackById,
+  onReorderPreview,
+  onReorderCommit
 }: {
   books: Audiobook[];
   subtitle?: (b: Audiobook) => React.ReactNode;
@@ -23,6 +40,8 @@ export function AudiobookGrid({
   onContextMenu?: (e: React.MouseEvent, b: Audiobook) => void;
   onToggleFavorite?: (b: Audiobook, next: boolean) => void;
   playbackById?: Record<string, { secondsIntoChapter?: number } | null>;
+  onReorderPreview?: (dragId: string, targetId: string) => void;
+  onReorderCommit?: (dragId: string, targetId: string) => void;
 }) {
   const { state } = usePlayer();
   return (
@@ -44,13 +63,48 @@ export function AudiobookGrid({
             title={b.displayName}
             draggable={true}
             onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = "copy";
+              logReorder("dragstart", { id: b.id, title: b.metadata?.title ?? b.displayName });
+              (window as any).__playrReorderDragId = b.id;
+              e.dataTransfer.effectAllowed = "copyMove";
               e.dataTransfer.setData(INTERNAL_DND_BOOK_TYPE, b.id);
+              e.dataTransfer.setData(INTERNAL_REORDER_TYPE, b.id);
               e.dataTransfer.setData("text/plain", b.id);
               // Prevent large cover-image ghost obscuring the UI.
               const img = new Image();
               img.src = TRANSPARENT_GIF;
               e.dataTransfer.setDragImage(img, 0, 0);
+            }}
+            onDragEnd={() => {
+              logReorder("dragend", { id: b.id });
+              (window as any).__playrReorderDragId = null;
+            }}
+            onDragOver={(e) => {
+              const types = Array.from(e.dataTransfer?.types ?? []);
+              if (!types.includes(INTERNAL_REORDER_TYPE)) return;
+              const dragId =
+                (window as any).__playrReorderDragId ||
+                e.dataTransfer.getData(INTERNAL_REORDER_TYPE) ||
+                e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE) ||
+                e.dataTransfer.getData("text/plain");
+              if (!dragId || dragId === b.id) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              logReorder("dragover", { dragId, overId: b.id, types });
+              onReorderPreview?.(dragId, b.id);
+            }}
+            onDrop={(e) => {
+              const types = Array.from(e.dataTransfer?.types ?? []);
+              if (!types.includes(INTERNAL_REORDER_TYPE)) return;
+              const dragId =
+                (window as any).__playrReorderDragId ||
+                e.dataTransfer.getData(INTERNAL_REORDER_TYPE) ||
+                e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE) ||
+                e.dataTransfer.getData("text/plain");
+              if (!dragId || dragId === b.id) return;
+              e.preventDefault();
+              logReorder("drop", { dragId, targetId: b.id, types });
+              onReorderCommit?.(dragId, b.id);
+              (window as any).__playrReorderDragId = null;
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
             onClick={() => onPlay(b)}

@@ -109,6 +109,7 @@ export function SettingsFeature() {
                   disabled={loading || saving}
                   onChange={(e) => void setAndPersist({ ...settings, sortBy: e.target.value as UserSettings["sortBy"] })}
                 >
+                  <option value="userOrder">User Order</option>
                   <option value="title">Title</option>
                   <option value="author">Author</option>
                   <option value="dateAdded">Date Added</option>

@@ -9,6 +9,7 @@ import { AudiobookList } from "@/src/renderer/features/audiobooks/AudiobookList"
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
 import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
+import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 
 function rangeLabel(r: UserSettings["recentlyAddedRange"]) {
   return r === "today"
@@ -54,6 +55,7 @@ export function LibraryFeature({
   const [detailsPlayback, setDetailsPlayback] = useState<PlaybackState | null>(null);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -163,8 +165,45 @@ export function LibraryFeature({
   }, [playbackById]);
 
   const sortedShown = useMemo(
-    () => sortAudiobooks(shown, settings.sortBy, playbackSecondsById),
-    [playbackSecondsById, settings.sortBy, shown]
+    () => sortAudiobooks(shown, settings.sortBy, playbackSecondsById, settings.libraryOrder),
+    [playbackSecondsById, settings.libraryOrder, settings.sortBy, shown]
+  );
+
+  const applyReorderPreview = useCallback(
+    (dragId: string, targetId: string) => {
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][library] preview", { dragId, targetId });
+      const current = (settings.libraryOrder ?? []).length ? (settings.libraryOrder ?? []) : sortedShown.map((b) => b.id);
+      const ids = Array.from(new Set([...current, ...sortedShown.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      setSettings((s) => ({ ...s, sortBy: "userOrder", libraryOrder: ids }));
+    },
+    [settings.libraryOrder, sortedShown]
+  );
+
+  const commitReorder = useCallback(
+    (dragId: string, targetId: string) => {
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][library] commit", { dragId, targetId });
+      const current = (settings.libraryOrder ?? []).length ? (settings.libraryOrder ?? []) : sortedShown.map((b) => b.id);
+      const ids = Array.from(new Set([...current, ...sortedShown.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      void (async () => {
+        const next: UserSettings = { ...settings, sortBy: "userOrder", libraryOrder: ids };
+        setSettings(next);
+        await window.audioplayer.settings.set(next);
+        window.dispatchEvent(new Event("audioplayer:settings-changed"));
+      })();
+    },
+    [settings, sortedShown]
   );
 
   const openDetails = useCallback(
@@ -274,6 +313,7 @@ export function LibraryFeature({
               })();
             }}
           >
+            <option value="userOrder">Sort by User Order</option>
             <option value="title">Sort by Title</option>
             <option value="author">Sort by Author</option>
             <option value="dateAdded">Sort by Date Added</option>
@@ -300,6 +340,8 @@ export function LibraryFeature({
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -320,6 +362,8 @@ export function LibraryFeature({
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -345,7 +389,8 @@ export function LibraryFeature({
           setAddToCollectionOpen(true);
         }}
         onRemove={() => {
-          if (selectedId) void removeBook(selectedId);
+          if (!selectedId) return;
+          setConfirmRemoveOpen(true);
         }}
       />
 
@@ -358,8 +403,36 @@ export function LibraryFeature({
 
       <AddToCollectionModal
         open={addToCollectionOpen}
-        book={addToCollectionBook}
+        books={addToCollectionBook ? [addToCollectionBook] : null}
         onClose={() => setAddToCollectionOpen(false)}
+      />
+
+      <ConfirmModal
+        open={confirmRemoveOpen}
+        title="Remove from Playr?"
+        message={
+          <div className="space-y-2">
+            <div>
+              This will remove{" "}
+              <span className="font-semibold text-white">
+                {selectedId ? books.find((b) => b.id === selectedId)?.metadata?.title ?? books.find((b) => b.id === selectedId)?.displayName ?? "this audiobook" : "this audiobook"}
+              </span>{" "}
+              from your library.
+            </div>
+            <div className="text-gray-400">It will also be removed from any collections and queues.</div>
+          </div>
+        }
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive={true}
+        onClose={() => setConfirmRemoveOpen(false)}
+        onConfirm={() => {
+          if (!selectedId) return;
+          void (async () => {
+            await removeBook(selectedId);
+            setConfirmRemoveOpen(false);
+          })();
+        }}
       />
     </section>
   );

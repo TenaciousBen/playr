@@ -6,11 +6,11 @@ import appIcon from "@/assets/icon.png";
 
 export function AddToCollectionModal({
   open,
-  book,
+  books,
   onClose
 }: {
   open: boolean;
-  book: Audiobook | null;
+  books: Audiobook[] | null;
   onClose: () => void;
 }) {
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -44,33 +44,35 @@ export function AddToCollectionModal({
     };
   }, [open]);
 
-  const title = useMemo(() => book?.metadata?.title ?? book?.displayName ?? "Audiobook", [book]);
+  const primary = useMemo(() => (books && books.length > 0 ? books[0] : null), [books]);
+  const title = useMemo(() => {
+    if (!books || books.length === 0) return "Audiobook";
+    if (books.length === 1) return books[0].metadata?.title ?? books[0].displayName ?? "Audiobook";
+    return `${books.length} audiobooks`;
+  }, [books]);
 
   const addTo = async (collectionId: string) => {
-    if (!book) return;
+    if (!books || books.length === 0) return;
     const current = collections.find((c) => c.id === collectionId);
     if (!current) return;
-    if (current.audiobookIds.includes(book.id)) {
-      onClose();
-      return;
-    }
-    const nextIds = [...current.audiobookIds, book.id];
+    const addIds = books.map((b) => b.id);
+    const nextIds = Array.from(new Set([...current.audiobookIds, ...addIds]));
     await window.audioplayer.collections.setBooks(collectionId, nextIds);
     window.dispatchEvent(new Event("audioplayer:collections-changed"));
     onClose();
   };
 
   const createAndAdd = async () => {
-    if (!book) return;
+    if (!books || books.length === 0) return;
     const name = newName.trim();
     if (!name) return;
     const created = await window.audioplayer.collections.create(name);
-    await window.audioplayer.collections.setBooks(created.id, [book.id]);
+    await window.audioplayer.collections.setBooks(created.id, books.map((b) => b.id));
     window.dispatchEvent(new Event("audioplayer:collections-changed"));
     onClose();
   };
 
-  if (!open || !book) return null;
+  if (!open || !books || books.length === 0) return null;
 
   return (
     <>
@@ -78,8 +80,12 @@ export function AddToCollectionModal({
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-gray-800 rounded-xl shadow-2xl border border-gray-700 w-[680px] max-h-[80vh] overflow-y-auto z-[165]">
         <div className="flex items-start justify-between p-6 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
           <div className="flex items-start space-x-5">
-            {book.metadata?.coverImagePath ? (
-              <img className="w-20 h-28 object-cover rounded-lg shadow-lg" src={toFileUrl(book.metadata.coverImagePath)} alt="cover" />
+            {primary?.metadata?.coverImagePath && books.length === 1 ? (
+              <img
+                className="w-20 h-28 object-cover rounded-lg shadow-lg"
+                src={toFileUrl(primary.metadata.coverImagePath)}
+                alt="cover"
+              />
             ) : (
               <div className="w-20 h-28 rounded-lg bg-gray-700 flex items-center justify-center">
                 <img src={appIcon} alt="Playr" className="w-8 h-8 opacity-90" />
@@ -88,7 +94,9 @@ export function AddToCollectionModal({
             <div className="min-w-0">
               <h2 className="text-xl font-bold mb-1">Add to Collection</h2>
               <div className="text-sm text-gray-300 truncate">{title}</div>
-              <div className="text-xs text-gray-400 mt-1">{(book.metadata?.authors ?? []).join(", ")}</div>
+              {primary ? (
+                <div className="text-xs text-gray-400 mt-1">{(primary.metadata?.authors ?? []).join(", ")}</div>
+              ) : null}
             </div>
           </div>
           <button className="text-gray-400 hover:text-white transition-colors" onClick={onClose} title="Close">

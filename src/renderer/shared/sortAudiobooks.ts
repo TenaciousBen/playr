@@ -4,7 +4,8 @@ import type { UserSettings } from "@/src/shared/models/userSettings";
 export function sortAudiobooks(
   books: Audiobook[],
   sortBy: UserSettings["sortBy"],
-  playbackSecondsById?: Record<string, number>
+  playbackSecondsById?: Record<string, number>,
+  userOrderIds?: string[]
 ) {
   const arr = [...books];
   const lower = (s: string) => s.toLowerCase();
@@ -17,6 +18,15 @@ export function sortAudiobooks(
   };
 
   arr.sort((a, b) => {
+    if (sortBy === "userOrder") {
+      const order = userOrderIds ?? [];
+      const pos = new Map<string, number>();
+      for (let i = 0; i < order.length; i++) pos.set(order[i], i);
+      const ap = pos.has(a.id) ? (pos.get(a.id) as number) : Number.POSITIVE_INFINITY;
+      const bp = pos.has(b.id) ? (pos.get(b.id) as number) : Number.POSITIVE_INFINITY;
+      if (ap !== bp) return ap - bp;
+      return lower(a.metadata?.title ?? a.displayName).localeCompare(lower(b.metadata?.title ?? b.displayName));
+    }
     if (sortBy === "title") {
       const at = lower(a.metadata?.title ?? a.displayName);
       const bt = lower(b.metadata?.title ?? b.displayName);

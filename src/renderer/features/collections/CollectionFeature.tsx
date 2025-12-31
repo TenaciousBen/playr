@@ -42,8 +42,10 @@ export function CollectionFeature() {
   const [detailsPlayback, setDetailsPlayback] = useState<PlaybackState | null>(null);
   const [playbackById, setPlaybackById] = useState<Record<string, PlaybackState | null>>({});
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+  const [confirmRemoveBookOpen, setConfirmRemoveBookOpen] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
+  const [localOrderIds, setLocalOrderIds] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -62,6 +64,7 @@ export function CollectionFeature() {
       const byId = new Map(lib.map((b) => [b.id, b] as const));
       const ordered = (c.audiobookIds ?? []).map((bid) => byId.get(bid)).filter(Boolean) as Audiobook[];
       setBooks(ordered);
+      setLocalOrderIds(c.audiobookIds ?? []);
     } finally {
       setLoading(false);
     }
@@ -144,8 +147,50 @@ export function CollectionFeature() {
   }, [playbackById]);
 
   const sortedBooks = useMemo(
-    () => sortAudiobooks(books, settings.sortBy, playbackSecondsById),
-    [books, playbackSecondsById, settings.sortBy]
+    () => sortAudiobooks(books, settings.sortBy, playbackSecondsById, localOrderIds),
+    [books, localOrderIds, playbackSecondsById, settings.sortBy]
+  );
+
+  const applyReorderPreview = useCallback(
+    (dragId: string, targetId: string) => {
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][collection] preview", { collectionId: collection?.id, dragId, targetId });
+      const base = localOrderIds.length ? localOrderIds : sortedBooks.map((b) => b.id);
+      const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      setLocalOrderIds(ids);
+      setSettings((s) => ({ ...s, sortBy: "userOrder" }));
+    },
+    [localOrderIds, sortedBooks]
+  );
+
+  const commitReorder = useCallback(
+    (dragId: string, targetId: string) => {
+      if (!collection) return;
+      // eslint-disable-next-line no-console
+      if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][collection] commit", { collectionId: collection.id, dragId, targetId });
+      const base = localOrderIds.length ? localOrderIds : sortedBooks.map((b) => b.id);
+      const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      ids.splice(from, 1);
+      ids.splice(to, 0, dragId);
+      setLocalOrderIds(ids);
+      void (async () => {
+        const nextSettings: UserSettings = { ...settings, sortBy: "userOrder" };
+        setSettings(nextSettings);
+        await window.audioplayer.settings.set(nextSettings);
+        window.dispatchEvent(new Event("audioplayer:settings-changed"));
+        await window.audioplayer.collections.setBooks(collection.id, ids);
+        window.dispatchEvent(new Event("audioplayer:collections-changed"));
+      })();
+    },
+    [collection, localOrderIds, settings, sortedBooks]
   );
 
   // Total listened time for books in collection (best-effort).
@@ -267,6 +312,7 @@ export function CollectionFeature() {
               })();
             }}
           >
+            <option value="userOrder">Sort by User Order</option>
             <option value="title">Sort by Title</option>
             <option value="author">Sort by Author</option>
             <option value="dateAdded">Sort by Date Added</option>
@@ -323,6 +369,8 @@ export function CollectionFeature() {
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -343,6 +391,8 @@ export function CollectionFeature() {
               setMenuOpen(true);
             }}
             onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+            onReorderPreview={applyReorderPreview}
+            onReorderCommit={commitReorder}
             playbackById={Object.fromEntries(
               Object.entries(playbackById).map(([id, st]) => [
                 id,
@@ -371,7 +421,8 @@ export function CollectionFeature() {
           if (selectedId) void removeFromCollection(selectedId);
         }}
         onRemove={() => {
-          if (selectedId) void removeBook(selectedId);
+          if (!selectedId) return;
+          setConfirmRemoveBookOpen(true);
         }}
       />
 
@@ -384,8 +435,36 @@ export function CollectionFeature() {
 
       <AddToCollectionModal
         open={addToCollectionOpen}
-        book={addToCollectionBook}
+        books={addToCollectionBook ? [addToCollectionBook] : null}
         onClose={() => setAddToCollectionOpen(false)}
+      />
+
+      <ConfirmModal
+        open={confirmRemoveBookOpen}
+        title="Remove from Playr?"
+        message={
+          <div className="space-y-2">
+            <div>
+              This will remove{" "}
+              <span className="font-semibold text-white">
+                {selectedId ? books.find((b) => b.id === selectedId)?.metadata?.title ?? books.find((b) => b.id === selectedId)?.displayName ?? "this audiobook" : "this audiobook"}
+              </span>{" "}
+              from your library.
+            </div>
+            <div className="text-gray-400">It will also be removed from any collections and queues.</div>
+          </div>
+        }
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        destructive={true}
+        onClose={() => setConfirmRemoveBookOpen(false)}
+        onConfirm={() => {
+          if (!selectedId) return;
+          void (async () => {
+            await removeBook(selectedId);
+            setConfirmRemoveBookOpen(false);
+          })();
+        }}
       />
 
       <ConfirmModal
