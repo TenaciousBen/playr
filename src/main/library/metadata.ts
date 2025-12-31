@@ -26,7 +26,7 @@ async function writeCoverImage(audiobookId: string, picture: { data: Uint8Array;
 export async function extractAudiobookMetadata(
   audiobookId: string,
   filePath: string
-): Promise<AudiobookMetadata | undefined> {
+): Promise<{ metadata?: AudiobookMetadata; durationSeconds?: number }> {
   try {
     const mm = await parseFile(filePath);
     const title = mm.common.album || mm.common.title || undefined;
@@ -47,12 +47,20 @@ export async function extractAudiobookMetadata(
       });
     }
 
-    if (!title && !subtitle && !authors && !coverImagePath) return undefined;
-    return { title, subtitle, authors, coverImagePath };
+    const durationSeconds =
+      typeof mm.format.duration === "number" && Number.isFinite(mm.format.duration)
+        ? mm.format.duration
+        : undefined;
+
+    const hasAny = !!title || !!subtitle || !!(authors && authors.length > 0) || !!coverImagePath;
+    return {
+      metadata: hasAny ? { title, subtitle, authors, coverImagePath } : undefined,
+      durationSeconds
+    };
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn("[metadata] failed to parse", { filePath, err });
-    return undefined;
+    return {};
   }
 }
 

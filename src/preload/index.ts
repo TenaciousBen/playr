@@ -29,7 +29,21 @@ const api: AudioplayerApi = {
       return await ipcRenderer.invoke(IpcChannels.Library.AddFiles, paths);
     },
     remove: (audiobookId) => ipcRenderer.invoke(IpcChannels.Library.Remove, audiobookId),
-    clear: () => ipcRenderer.invoke(IpcChannels.Library.Clear)
+    clear: () => ipcRenderer.invoke(IpcChannels.Library.Clear),
+    setFavorite: (audiobookId, isFavorite) =>
+      ipcRenderer.invoke(IpcChannels.Library.SetFavorite, audiobookId, isFavorite)
+    ,
+    setDuration: (audiobookId, durationSeconds) =>
+      ipcRenderer.invoke(IpcChannels.Library.SetDuration, audiobookId, durationSeconds)
+  },
+  collections: {
+    list: () => ipcRenderer.invoke(IpcChannels.Collections.List),
+    create: (name) => ipcRenderer.invoke(IpcChannels.Collections.Create, name),
+    rename: (collectionId, name) =>
+      ipcRenderer.invoke(IpcChannels.Collections.Rename, collectionId, name),
+    remove: (collectionId) => ipcRenderer.invoke(IpcChannels.Collections.Remove, collectionId),
+    setBooks: (collectionId, audiobookIds) =>
+      ipcRenderer.invoke(IpcChannels.Collections.SetBooks, collectionId, audiobookIds)
   },
   settings: {
     get: () => ipcRenderer.invoke(IpcChannels.Settings.Get),

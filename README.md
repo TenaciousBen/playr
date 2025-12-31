@@ -1,6 +1,6 @@
-# Audioplayer
+# Playr
 
-Audioplayer is an Electron-based audio player for the purpose of playing audiobooks.
+Playr is an Electron-based audio player for the purpose of playing audiobooks.
 
 ## Project goals
 

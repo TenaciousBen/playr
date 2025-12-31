@@ -1,5 +1,6 @@
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
+import type { Collection, CollectionId } from "@/src/shared/models/collection";
 import type { UserSettings } from "@/src/shared/models/userSettings";
 
 /**
@@ -21,6 +22,15 @@ export type AudioplayerApi = {
     addDroppedFiles(files: File[]): Promise<void>;
     remove(audiobookId: string): Promise<void>;
     clear(): Promise<void>;
+    setFavorite(audiobookId: string, isFavorite: boolean): Promise<void>;
+    setDuration(audiobookId: string, durationSeconds: number): Promise<void>;
+  };
+  collections: {
+    list(): Promise<Collection[]>;
+    create(name: string): Promise<Collection>;
+    rename(collectionId: CollectionId, name: string): Promise<void>;
+    remove(collectionId: CollectionId): Promise<void>;
+    setBooks(collectionId: CollectionId, audiobookIds: string[]): Promise<void>;
   };
   settings: {
     get(): Promise<UserSettings>;

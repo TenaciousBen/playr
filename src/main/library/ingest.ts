@@ -40,28 +40,6 @@ async function listAudioFilesRecursive(root: string): Promise<string[]> {
   return out;
 }
 
-function chaptersFromFiles(files: string[]): AudiobookChapter[] {
-  const sorted = [...files].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  return sorted.map((filePath, index) => ({
-    index,
-    title: path.basename(filePath, path.extname(filePath)),
-    filePath
-  }));
-}
-
-function folderToAudiobook(rootFolderPath: string, files: string[]): Audiobook {
-  const folderName = path.basename(rootFolderPath);
-  const chapters = chaptersFromFiles(files);
-
-  return {
-    // Stable id: root folder path
-    id: rootFolderPath,
-    displayName: folderName,
-    rootFolderPath,
-    chapters
-  };
-}
-
 function fileToAudiobook(filePath: string): Audiobook {
   const base = path.basename(filePath, path.extname(filePath));
   const folder = path.dirname(filePath);
@@ -83,8 +61,8 @@ function fileToAudiobook(filePath: string): Audiobook {
 /**
  * Ingest dropped paths (files and/or folders) into Audiobook entities.
  *
- * - Dropped files become single-file "audiobooks" (so a single `.m4b` doesn't show as the parent folder name).
- * - Folders are scanned recursively for supported audio files.
+ * - A single audio file represents a single Audiobook.
+ * - Dropped folders are scanned recursively for supported audio files and each file becomes its own Audiobook.
  */
 export async function ingestPathsToAudiobooks(
   inputPaths: string[]
@@ -107,20 +85,12 @@ export async function ingestPathsToAudiobooks(
     books.push(fileToAudiobook(f));
   }
 
-  // 2) Folder drops => scan + group by folder containing audio files
-  const scannedAudioFiles: string[] = [];
+  // 2) Folder drops => recursively scan and add every supported audio file as a single-file audiobook
   for (const folder of folderInputs) {
-    scannedAudioFiles.push(...(await listAudioFilesRecursive(folder)));
-  }
-  const byFolder = new Map<string, string[]>();
-  for (const f of scannedAudioFiles) {
-    const folder = path.dirname(f);
-    const arr = byFolder.get(folder) ?? [];
-    arr.push(f);
-    byFolder.set(folder, arr);
-  }
-  for (const [folder, files] of byFolder) {
-    books.push(folderToAudiobook(folder, files));
+    const files = await listAudioFilesRecursive(folder);
+    for (const f of files) {
+      books.push(fileToAudiobook(f));
+    }
   }
 
   // 3) Populate metadata (best-effort) using first chapter file.
@@ -128,11 +98,16 @@ export async function ingestPathsToAudiobooks(
     books.map(async (b) => {
       const first = b.chapters[0]?.filePath;
       if (!first) return;
-      const md = await extractAudiobookMetadata(b.id, first);
-      if (md) {
-        b.metadata = md;
+      const res = await extractAudiobookMetadata(b.id, first);
+      if (typeof res.durationSeconds === "number" && Number.isFinite(res.durationSeconds) && res.durationSeconds > 0) {
+        b.durationSeconds = res.durationSeconds;
+        // Since we model "one file = one audiobook", also store chapter duration for convenience.
+        if (b.chapters[0]) b.chapters[0].durationSeconds = res.durationSeconds;
+      }
+      if (res.metadata) {
+        b.metadata = res.metadata;
         // Prefer metadata title for display.
-        if (md.title) b.displayName = md.title;
+        if (res.metadata.title) b.displayName = res.metadata.title;
       }
     })
   );

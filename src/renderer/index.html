@@ -10,14 +10,8 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
-    <script>
-      window.FontAwesomeConfig = { autoReplaceSvg: "nest" };
-    </script>
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
+    <!-- NOTE: We intentionally do NOT load FontAwesome's JS auto-replacement, because it can
+         mutate <i> tags into SVGs and conflict with React re-rendering (causing icon overlap). -->
 
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
@@ -39,6 +33,17 @@
     <style>
       ::-webkit-scrollbar {
         display: none;
+      }
+      /* Make drag interactions feel native: prevent accidental text selection */
+      body {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      input,
+      textarea,
+      [contenteditable="true"] {
+        -webkit-user-select: text;
+        user-select: text;
       }
     </style>
   </head>

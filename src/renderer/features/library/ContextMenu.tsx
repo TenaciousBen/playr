@@ -6,7 +6,9 @@ export function ContextMenu({
   y,
   onClose,
   onDetails,
-  onRemove
+  onRemove,
+  removeLabel = "Remove from Playr",
+  onRemoveFromCollection
 }: {
   open: boolean;
   x: number;
@@ -14,6 +16,8 @@ export function ContextMenu({
   onClose: () => void;
   onDetails: () => void;
   onRemove: () => void;
+  removeLabel?: string;
+  onRemoveFromCollection?: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -59,6 +63,21 @@ export function ContextMenu({
         <i className="fas fa-info-circle text-sm"></i>
         <span>Details</span>
       </button>
+      {onRemoveFromCollection ? (
+        <>
+          <div className="border-t border-gray-700 my-1"></div>
+          <button
+            onClick={() => {
+              onRemoveFromCollection();
+              onClose();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center space-x-3"
+          >
+            <i className="fas fa-layer-group text-sm"></i>
+            <span>Remove from Collection</span>
+          </button>
+        </>
+      ) : null}
       <div className="border-t border-gray-700 my-1"></div>
       <button
         onClick={() => {
@@ -68,7 +87,7 @@ export function ContextMenu({
         className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors flex items-center space-x-3"
       >
         <i className="fas fa-trash text-sm"></i>
-        <span>Remove</span>
+        <span>{removeLabel}</span>
       </button>
     </div>
   );

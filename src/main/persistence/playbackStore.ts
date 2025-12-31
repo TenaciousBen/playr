@@ -8,9 +8,11 @@ const PLAYBACK_FILE = "playback.json";
 export type PersistedPlayback = {
   /** Last-known playback state per audiobook id */
   byAudiobookId: Record<AudiobookId, PlaybackState>;
+  /** Most recently opened/played audiobook id (best-effort) */
+  lastAudiobookId?: AudiobookId;
 };
 
-const EMPTY: PersistedPlayback = { byAudiobookId: {} };
+const EMPTY: PersistedPlayback = { byAudiobookId: {}, lastAudiobookId: undefined };
 
 export async function loadPlayback(): Promise<PersistedPlayback> {
   return await readJsonFile<PersistedPlayback>(getUserDataFilePath(PLAYBACK_FILE), EMPTY);

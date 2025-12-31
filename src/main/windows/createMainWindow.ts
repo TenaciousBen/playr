@@ -1,5 +1,5 @@
 import path from "path";
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -10,6 +10,7 @@ export function createMainWindow(): BrowserWindow {
     width: 1100,
     height: 750,
     show: true,
+    icon: path.join(app.getAppPath(), "assets", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

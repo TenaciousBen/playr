@@ -8,8 +8,17 @@ export const IpcChannels = {
     AddFolders: "library:add-folders",
     Remove: "library:remove",
     Clear: "library:clear",
+    SetFavorite: "library:set-favorite",
+    SetDuration: "library:set-duration",
     Search: "library:search",
     List: "library:list"
+  },
+  Collections: {
+    List: "collections:list",
+    Create: "collections:create",
+    Rename: "collections:rename",
+    Remove: "collections:remove",
+    SetBooks: "collections:set-books"
   },
   Settings: {
     Get: "settings:get",

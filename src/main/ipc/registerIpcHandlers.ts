@@ -11,6 +11,8 @@ import path from "path";
 import { app } from "electron";
 import { loadSettings, saveSettings } from "@/src/main/persistence/settingsStore";
 import type { UserSettings } from "@/src/shared/models/userSettings";
+import type { Collection } from "@/src/shared/models/collection";
+import { loadCollections, saveCollections } from "@/src/main/persistence/collectionsStore";
 
 /**
  * Central place to register IPC handlers.
@@ -68,10 +70,18 @@ export function registerIpcHandlers() {
           }))
         });
 
-        // Merge by rootFolderPath (stable id).
+        // Merge by id (stable id). Preserve user fields on existing items.
         const byId = new Map<string, Audiobook>();
         for (const b of existing) byId.set(b.id, b);
-        for (const b of incoming) byId.set(b.id, b);
+        for (const b of incoming) {
+          const prev = byId.get(b.id);
+          const merged: Audiobook = {
+            ...b,
+            isFavorite: prev?.isFavorite ?? b.isFavorite ?? false,
+            addedAt: prev?.addedAt ?? b.addedAt ?? new Date().toISOString()
+          };
+          byId.set(b.id, merged);
+        }
 
         const merged = Array.from(byId.values()).sort((a, b) =>
           a.displayName.localeCompare(b.displayName, undefined, { numeric: true })
@@ -148,7 +158,15 @@ export function registerIpcHandlers() {
 
       const byId = new Map<string, Audiobook>();
       for (const b of existing) byId.set(b.id, b);
-      for (const b of incoming) byId.set(b.id, b);
+      for (const b of incoming) {
+        const prev = byId.get(b.id);
+        const merged: Audiobook = {
+          ...b,
+          isFavorite: prev?.isFavorite ?? b.isFavorite ?? false,
+          addedAt: prev?.addedAt ?? b.addedAt ?? new Date().toISOString()
+        };
+        byId.set(b.id, merged);
+      }
 
       const merged = Array.from(byId.values()).sort((a, b) =>
         a.displayName.localeCompare(b.displayName, undefined, { numeric: true })
@@ -158,11 +176,84 @@ export function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(
+    IpcChannels.Library.SetFavorite,
+    async (_event: IpcMainInvokeEvent, audiobookId: string, isFavorite: boolean): Promise<void> => {
+      const existing = await loadLibrary();
+      const next = existing.map((b) => (b.id === audiobookId ? { ...b, isFavorite: !!isFavorite } : b));
+      await saveLibrary(next);
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannels.Library.SetDuration,
+    async (_event: IpcMainInvokeEvent, audiobookId: string, durationSeconds: number): Promise<void> => {
+      const dur = Number(durationSeconds);
+      if (!Number.isFinite(dur) || dur <= 0) return;
+      const existing = await loadLibrary();
+      const next = existing.map((b) =>
+        b.id === audiobookId ? { ...b, durationSeconds: dur, chapters: b.chapters } : b
+      );
+      await saveLibrary(next);
+    }
+  );
+
+  ipcMain.handle(IpcChannels.Collections.List, async (): Promise<Collection[]> => {
+    return await loadCollections();
+  });
+
+  ipcMain.handle(
+    IpcChannels.Collections.Create,
+    async (_event: IpcMainInvokeEvent, name: string): Promise<Collection> => {
+      const existing = await loadCollections();
+      const now = new Date().toISOString();
+      const id = `${now}:${name}`;
+      const c: Collection = { id, name: name.trim() || "Untitled", createdAt: now, audiobookIds: [] };
+      const next = [...existing, c].sort((a, b) => a.name.localeCompare(b.name));
+      await saveCollections(next);
+      return c;
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannels.Collections.Rename,
+    async (_event: IpcMainInvokeEvent, collectionId: string, name: string): Promise<void> => {
+      const existing = await loadCollections();
+      const next = existing.map((c) => (c.id === collectionId ? { ...c, name: name.trim() || c.name } : c));
+      await saveCollections(next);
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannels.Collections.Remove,
+    async (_event: IpcMainInvokeEvent, collectionId: string): Promise<void> => {
+      const existing = await loadCollections();
+      const next = existing.filter((c) => c.id !== collectionId);
+      await saveCollections(next);
+    }
+  );
+
+  ipcMain.handle(
+    IpcChannels.Collections.SetBooks,
+    async (
+      _event: IpcMainInvokeEvent,
+      collectionId: string,
+      audiobookIds: string[]
+    ): Promise<void> => {
+      const existing = await loadCollections();
+      const ids = Array.from(new Set(audiobookIds ?? []));
+      const next = existing.map((c) => (c.id === collectionId ? { ...c, audiobookIds: ids } : c));
+      await saveCollections(next);
+    }
+  );
+
   ipcMain.handle(IpcChannels.Playback.GetState, async (): Promise<PlaybackState> => {
-    // Return the most recently updated state we have (best-effort).
+    // Return the most recently opened/updated state we have (best-effort).
     const persisted = await loadPlayback();
-    const states = Object.values(persisted.byAudiobookId);
-    return states[0] ?? { isPlaying: false, rate: 1 };
+    const last = persisted.lastAudiobookId
+      ? persisted.byAudiobookId[persisted.lastAudiobookId]
+      : undefined;
+    return last ?? { isPlaying: false, rate: 1 };
   });
 
   ipcMain.handle(IpcChannels.Settings.Get, async (): Promise<UserSettings> => {
@@ -200,6 +291,7 @@ export function registerIpcHandlers() {
       const persisted = await loadPlayback();
       if (state.position?.audiobookId) {
         persisted.byAudiobookId[state.position.audiobookId] = state;
+        persisted.lastAudiobookId = state.position.audiobookId;
         await savePlayback(persisted);
       }
     }

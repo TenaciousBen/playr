@@ -5,7 +5,12 @@ import { getUserDataFilePath } from "@/src/main/persistence/paths";
 const LIBRARY_FILE = "library.json";
 
 export async function loadLibrary(): Promise<Audiobook[]> {
-  return await readJsonFile<Audiobook[]>(getUserDataFilePath(LIBRARY_FILE), []);
+  const raw = await readJsonFile<Audiobook[]>(getUserDataFilePath(LIBRARY_FILE), []);
+  // Normalize for forward compatibility (new fields may be missing).
+  return (raw ?? []).map((b) => ({
+    ...b,
+    isFavorite: b.isFavorite ?? false
+  }));
 }
 
 export async function saveLibrary(library: Audiobook[]): Promise<void> {

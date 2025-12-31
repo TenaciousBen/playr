@@ -16,13 +16,16 @@ export function DropOverlay({
     }
 
     const allowDrop = (e: DragEvent) => {
+      // Ignore internal drag-and-drop (e.g. dragging audiobooks into collections).
+      const types = Array.from(e.dataTransfer?.types ?? []);
+      if (types.includes("application/x-playr-audiobook-id")) return;
+
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       setVisible(true);
     };
 
     const hideOnLeaveWindow = (e: DragEvent) => {
-      // When leaving the window entirely, relatedTarget is often null.
       if (!e.relatedTarget) setVisible(false);
     };
 

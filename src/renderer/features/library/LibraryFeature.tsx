@@ -1,15 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
 import { ContextMenu } from "@/src/renderer/features/library/ContextMenu";
 import { DetailsModal } from "@/src/renderer/features/library/DetailsModal";
+import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
+import { AudiobookGrid } from "@/src/renderer/features/audiobooks/AudiobookGrid";
+import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
 
-type OutletCtx = { search: string };
+function rangeLabel(r: UserSettings["recentlyAddedRange"]) {
+  return r === "today"
+    ? "Today"
+    : r === "week"
+      ? "Past Week"
+      : r === "month"
+        ? "Past Month"
+        : r === "quarter"
+          ? "Past Quarter"
+          : "Past Year";
+}
 
-function toFileUrl(p: string) {
-  const norm = p.replace(/\\/g, "/");
-  return `file:///${encodeURI(norm)}`;
+function rangeStart(r: UserSettings["recentlyAddedRange"]) {
+  const now = new Date();
+  if (r === "today") {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  const days = r === "week" ? 7 : r === "month" ? 30 : r === "quarter" ? 90 : 365;
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 }
 
 export function LibraryFeature({
@@ -17,9 +35,12 @@ export function LibraryFeature({
 }: {
   mode?: "library" | "recent" | "reading" | "favorites";
 }) {
-  const { search } = useOutletContext<OutletCtx>();
+  const player = usePlayer();
   const [books, setBooks] = useState<Audiobook[]>([]);
   const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [timeMenuOpen, setTimeMenuOpen] = useState(false);
+  const [playbackById, setPlaybackById] = useState<Record<string, PlaybackState | null>>({});
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
@@ -44,29 +65,80 @@ export function LibraryFeature({
   }, [refresh]);
 
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const s = await window.audioplayer.settings.get();
+        if (alive) setSettings(s);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const onChanged = () => void refresh();
     window.addEventListener("audioplayer:library-changed", onChanged);
     return () => window.removeEventListener("audioplayer:library-changed", onChanged);
   }, [refresh]);
 
-  const filtered = useMemo(() => {
-    // TODO: implement real mode filtering (recent/reading/favorites)
-    if (mode !== "library") return books;
-    const q = search.trim();
-    if (!q) return books;
-    return books.filter((b) => {
-      const hay = [
-        b.displayName,
-        b.metadata?.title,
-        b.metadata?.subtitle,
-        ...(b.metadata?.authors ?? [])
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q.toLowerCase());
-    });
-  }, [books, mode, search]);
+  // Cache playback state (used by "Currently Reading" filter and collection/author stats).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ids = books.map((b) => b.id);
+      if (ids.length === 0) {
+        if (alive) setPlaybackById({});
+        return;
+      }
+      const entries = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const st = await window.audioplayer.playback.getStateForAudiobook(id);
+            return [id, st] as const;
+          } catch {
+            return [id, null] as const;
+          }
+        })
+      );
+      if (!alive) return;
+      const next: Record<string, PlaybackState | null> = {};
+      for (const [id, st] of entries) next[id] = st;
+      setPlaybackById(next);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [books]);
+
+  const shown = useMemo(() => {
+    // TODO: implement real mode filtering (reading)
+    if (mode === "favorites") return books.filter((b) => !!b.isFavorite);
+    if (mode === "recent") {
+      const start = rangeStart(settings.recentlyAddedRange);
+      return books.filter((b) => {
+        if (!b.addedAt) return false;
+        const d = new Date(b.addedAt);
+        if (!Number.isFinite(d.getTime())) return false;
+        return d >= start;
+      });
+    }
+    if (mode === "reading") {
+      return books.filter((b) => {
+        const st = playbackById[b.id];
+        const pos = st?.position;
+        if (!pos) return false;
+        if (!(pos.secondsIntoChapter > 0)) return false; // >0%
+        const dur = b.durationSeconds;
+        if (!dur || !Number.isFinite(dur) || dur <= 0) return false; // need runtime to be correct
+        return pos.secondsIntoChapter < dur * 0.995; // <100%
+      });
+    }
+    return books;
+  }, [books, mode, playbackById, settings.recentlyAddedRange]);
 
   const openDetails = useCallback(
     async (id: string) => {
@@ -93,6 +165,11 @@ export function LibraryFeature({
     []
   );
 
+  const setFavorite = useCallback(async (id: string, isFavorite: boolean) => {
+    await window.audioplayer.library.setFavorite(id, isFavorite);
+    window.dispatchEvent(new Event("audioplayer:library-changed"));
+  }, []);
+
   return (
     <section className="relative flex-1 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
@@ -106,10 +183,59 @@ export function LibraryFeature({
                   ? "Currently Reading"
                   : "Favorites"}
           </h2>
-          <p className="text-gray-400 mt-1">{loading ? "Loading…" : `${filtered.length} audiobook(s)`}</p>
+          <p className="text-gray-400 mt-1">{loading ? "Loading…" : `${shown.length} audiobook(s)`}</p>
         </div>
         <div className="flex items-center space-x-3">
+          {mode === "recent" ? (
+            <div className="relative" id="time-filter-dropdown">
+              <button
+                className="bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center space-x-2 hover:bg-gray-600 transition-colors"
+                onClick={() => setTimeMenuOpen((v) => !v)}
+              >
+                <i className="fas fa-calendar-alt text-gray-400"></i>
+                <span id="selected-time-filter">{rangeLabel(settings.recentlyAddedRange)}</span>
+                <i className="fas fa-chevron-down text-gray-400 text-xs"></i>
+              </button>
+
+              {timeMenuOpen ? (
+                <div
+                  id="time-filter-menu"
+                  className="absolute right-0 mt-2 w-48 bg-gray-700 border border-gray-600 rounded-lg shadow-xl z-10"
+                >
+                  <div className="py-1">
+                    {(
+                      ["today", "week", "month", "quarter", "year"] as Array<
+                        UserSettings["recentlyAddedRange"]
+                      >
+                    ).map((r) => {
+                      const active = settings.recentlyAddedRange === r;
+                      return (
+                        <button
+                          key={r}
+                          className={[
+                            "w-full text-left px-4 py-2 text-sm transition-colors",
+                            active ? "bg-gray-600 text-white" : "text-gray-300 hover:bg-gray-600"
+                          ].join(" ")}
+                          onClick={() => {
+                            void (async () => {
+                              const next: UserSettings = { ...settings, recentlyAddedRange: r };
+                              setSettings(next);
+                              setTimeMenuOpen(false);
+                              await window.audioplayer.settings.set(next);
+                            })();
+                          }}
+                        >
+                          {rangeLabel(r)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <select className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {mode === "recent" ? <option>Sort by Date Added</option> : <option>Sort by Title</option>}
             <option>Sort by Title</option>
             <option>Sort by Author</option>
             <option>Sort by Date Added</option>
@@ -118,50 +244,31 @@ export function LibraryFeature({
         </div>
       </div>
 
-      {filtered.length === 0 && !loading ? (
+      {shown.length === 0 && !loading ? (
         <div className="border border-gray-700 bg-gray-800/40 rounded-xl p-8 text-center">
           <div className="text-xl font-semibold">Your library is empty</div>
           <div className="text-gray-400 mt-2">Drag and drop audio files or a folder here to add an audiobook.</div>
         </div>
       ) : (
-        <div className="grid grid-cols-5 gap-6">
-          {filtered.map((b) => (
-            <div
-              key={b.id}
-              className="audiobook-card group cursor-pointer"
-              title={b.displayName}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setSelectedId(b.id);
-                setMenuPos({ x: e.clientX, y: e.clientY });
-                setMenuOpen(true);
-              }}
-              onDoubleClick={() => void openDetails(b.id)}
-            >
-              <div className="relative mb-3">
-                {b.metadata?.coverImagePath ? (
-                  <img
-                    className="w-full h-48 object-cover rounded-lg shadow-lg"
-                    src={toFileUrl(b.metadata.coverImagePath)}
-                    alt={b.metadata?.title ?? b.displayName}
-                  />
-                ) : (
-                  <div className="w-full h-48 rounded-lg shadow-lg bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center">
-                    <i className="fas fa-book text-gray-400 text-3xl"></i>
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center">
-                  <i className="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></i>
-                </div>
-              </div>
-              <h3 className="font-semibold text-sm mb-1 line-clamp-2">{b.metadata?.title ?? b.displayName}</h3>
-              {b.metadata?.authors?.length ? (
-                <p className="text-gray-400 text-xs mb-1">{b.metadata.authors.join(", ")}</p>
-              ) : null}
-              <p className="text-gray-500 text-xs">{b.chapters.length} file(s)</p>
-            </div>
-          ))}
-        </div>
+        <AudiobookGrid
+          books={shown}
+          subtitle={(b) => `${b.chapters.length} file(s)`}
+          onPlay={(b) => void player.actions.playBook(b)}
+          onOpenDetails={(b) => void openDetails(b.id)}
+          onContextMenu={(e, b) => {
+            e.preventDefault();
+            setSelectedId(b.id);
+            setMenuPos({ x: e.clientX, y: e.clientY });
+            setMenuOpen(true);
+          }}
+          onToggleFavorite={(b, next) => void setFavorite(b.id, next)}
+          playbackById={Object.fromEntries(
+            Object.entries(playbackById).map(([id, st]) => [
+              id,
+              st ? { secondsIntoChapter: st.position?.secondsIntoChapter } : null
+            ])
+          )}
+        />
       )}
 
       <ContextMenu

@@ -25,6 +25,12 @@ export type Audiobook = {
   displayName: string;
   /** Folder that was added to the library */
   rootFolderPath: string;
+  /** When this audiobook was added to the library (ISO string). */
+  addedAt?: string;
+  /** Full runtime in seconds (best-effort). */
+  durationSeconds?: number;
+  /** Whether the user has favorited this audiobook. */
+  isFavorite?: boolean;
   metadata?: AudiobookMetadata;
   chapters: AudiobookChapter[];
 };

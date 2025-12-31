@@ -2,6 +2,18 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { UserSettings } from "@/src/shared/models/userSettings";
 import { DEFAULT_USER_SETTINGS } from "@/src/shared/models/userSettings";
 
+function recentlyAddedLabel(r: UserSettings["recentlyAddedRange"]) {
+  return r === "today"
+    ? "Today"
+    : r === "week"
+      ? "Past Week"
+      : r === "month"
+        ? "Past Month"
+        : r === "quarter"
+          ? "Past Quarter"
+          : "Past Year";
+}
+
 export function SettingsFeature() {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -65,6 +77,35 @@ export function SettingsFeature() {
           </div>
 
           <div className="space-y-6">
+            <div className="flex items-start justify-between py-4">
+              <div className="flex-1">
+                <h4 className="text-base font-medium text-white mb-1">Recently Added Range</h4>
+                <p className="text-sm text-gray-400 leading-relaxed">
+                  Choose which time window is shown in the Recently Added view.
+                </p>
+              </div>
+              <div className="ml-8 flex-shrink-0">
+                <select
+                  className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  value={settings.recentlyAddedRange}
+                  disabled={loading || saving}
+                  onChange={(e) =>
+                    void setAndPersist({
+                      ...settings,
+                      recentlyAddedRange: e.target.value as UserSettings["recentlyAddedRange"]
+                    })
+                  }
+                  aria-label={`Recently Added range ${recentlyAddedLabel(settings.recentlyAddedRange)}`}
+                >
+                  <option value="today">Today</option>
+                  <option value="week">Past Week</option>
+                  <option value="month">Past Month</option>
+                  <option value="quarter">Past Quarter</option>
+                  <option value="year">Past Year</option>
+                </select>
+              </div>
+            </div>
+
             <div className="flex items-start justify-between py-4">
               <div className="flex-1">
                 <h4 className="text-base font-medium text-white mb-1">Empty Library</h4>
