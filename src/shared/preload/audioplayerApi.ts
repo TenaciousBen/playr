@@ -12,9 +12,18 @@ export type AudioplayerApi = {
     list(): Promise<Audiobook[]>;
     search(query: string): Promise<Audiobook[]>;
     addFolders(folderPaths: string[]): Promise<void>;
+    addFiles(filePaths: string[]): Promise<void>;
+    /**
+     * Preferred way to ingest drag-and-drop file(s) from the renderer.
+     * Electron can securely map a `File` object to a native path via `webUtils.getPathForFile`.
+     */
+    addDroppedFiles(files: File[]): Promise<void>;
+    remove(audiobookId: string): Promise<void>;
   };
   playback: {
     getState(): Promise<PlaybackState>;
+    getStateForAudiobook(audiobookId: string): Promise<PlaybackState>;
+    setState(state: PlaybackState): Promise<void>;
     play(): Promise<void>;
     pause(): Promise<void>;
   };

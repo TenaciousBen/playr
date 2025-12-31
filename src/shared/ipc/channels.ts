@@ -4,7 +4,9 @@
  */
 export const IpcChannels = {
   Library: {
+    AddFiles: "library:add-files",
     AddFolders: "library:add-folders",
+    Remove: "library:remove",
     Search: "library:search",
     List: "library:list"
   },
@@ -16,7 +18,9 @@ export const IpcChannels = {
     SkipBy: "playback:skip-by",
     NextChapter: "playback:next-chapter",
     PrevChapter: "playback:prev-chapter",
-    GetState: "playback:get-state"
+    GetState: "playback:get-state",
+    GetStateForAudiobook: "playback:get-state-for-audiobook",
+    SetState: "playback:set-state"
   }
 } as const;
 

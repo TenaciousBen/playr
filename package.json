@@ -13,6 +13,9 @@
     "build": "electron-vite build",
     "dist": "npm run build && electron-builder --win portable"
   },
+  "dependencies": {
+    "music-metadata": "^11.9.0"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "electron": "^37.0.0",

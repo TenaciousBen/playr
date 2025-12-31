@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IpcChannels } from "@/src/shared/ipc/channels";
 import type { AudioplayerApi } from "@/src/shared/preload/audioplayerApi";
 
@@ -7,10 +7,34 @@ const api: AudioplayerApi = {
     list: () => ipcRenderer.invoke(IpcChannels.Library.List),
     search: (query) => ipcRenderer.invoke(IpcChannels.Library.Search, query),
     addFolders: (folderPaths) =>
-      ipcRenderer.invoke(IpcChannels.Library.AddFolders, folderPaths)
+      ipcRenderer.invoke(IpcChannels.Library.AddFolders, folderPaths),
+    addFiles: (filePaths) => ipcRenderer.invoke(IpcChannels.Library.AddFiles, filePaths),
+    addDroppedFiles: async (files) => {
+      const paths = (files ?? [])
+        .map((f) => {
+          try {
+            return webUtils.getPathForFile(f);
+          } catch {
+            return "";
+          }
+        })
+        .filter((p) => typeof p === "string" && p.length > 0);
+
+      // eslint-disable-next-line no-console
+      console.log("[preload] addDroppedFiles", {
+        filesLength: files?.length ?? 0,
+        extractedPaths: paths.length
+      });
+
+      return await ipcRenderer.invoke(IpcChannels.Library.AddFiles, paths);
+    },
+    remove: (audiobookId) => ipcRenderer.invoke(IpcChannels.Library.Remove, audiobookId)
   },
   playback: {
     getState: () => ipcRenderer.invoke(IpcChannels.Playback.GetState),
+    getStateForAudiobook: (audiobookId) =>
+      ipcRenderer.invoke(IpcChannels.Playback.GetStateForAudiobook, audiobookId),
+    setState: (state) => ipcRenderer.invoke(IpcChannels.Playback.SetState, state),
     play: () => ipcRenderer.invoke(IpcChannels.Playback.Play),
     pause: () => ipcRenderer.invoke(IpcChannels.Playback.Pause)
   }
