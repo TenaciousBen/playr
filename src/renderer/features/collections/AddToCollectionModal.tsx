@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { Collection } from "@/src/shared/models/collection";
 import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
-import appIcon from "@/assets/icon.png";
+import appIcon from "@/assets/icon.ico";
 
 export function AddToCollectionModal({
   open,

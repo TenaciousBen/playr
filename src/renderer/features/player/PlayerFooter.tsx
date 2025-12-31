@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
-import appIcon from "@/assets/icon.png";
+import appIcon from "@/assets/icon.ico";
 
 function formatClock(seconds: number) {
   const s = Math.max(0, Math.floor(seconds));

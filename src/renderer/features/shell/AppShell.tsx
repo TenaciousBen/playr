@@ -8,7 +8,7 @@ import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { Collection } from "@/src/shared/models/collection";
 import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/userSettings";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
-import appIcon from "@/assets/icon.png";
+import appIcon from "@/assets/icon.ico";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
 

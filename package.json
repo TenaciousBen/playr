@@ -9,7 +9,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prebuild": "node scripts/generate-icons.mjs",
+    "generate-icons": "node scripts/generate-icons.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "npm run build && electron-builder --win portable",

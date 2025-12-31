@@ -10,7 +10,7 @@ export function createMainWindow(): BrowserWindow {
     width: 1100,
     height: 750,
     show: true,
-    icon: path.join(app.getAppPath(), "assets", "icon.png"),
+    icon: path.join(app.getAppPath(), "assets", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
