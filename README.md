@@ -1,18 +1,22 @@
 # Playr
 
+![Playr author mode](https://raw.githubusercontent.com/TenaciousBen/playr/refs/heads/main/assets/app.png "Playr author mode)
+
 Playr is an Electron-based audio player for the purpose of playing audiobooks.
 
-## Project goals
+## Features
 
-- Present a library of audiobooks based on folders and files the user drags into the Library window of the application
-- Keep track of last played location of audiobooks
-- Present the title, subtitle, author(s) and imagery of the audiobook from the file metadata
+- Presenting a library of audiobooks based on folders and files the user drags into the Library window of the application
+- Keeping track of last played location of audiobooks
+- Presenting the title, subtitle, author(s) and imagery of the audiobook from the file metadata
 - Allow searching of the library by any of the textual tags above
 - Provide a fully featured audio media player supporting:
   - Pausing
   - Skipping chapters
   - Adjusting play speed
   - Skipping forward or backwards by 10 seconds
+  - Playing audio queues (collections of podcast episodes etc)
+- Favouriting media and searching by favourites
 
 ## Source layout
 
