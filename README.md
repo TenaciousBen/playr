@@ -2,7 +2,7 @@
 
 ![Playr author mode](https://raw.githubusercontent.com/TenaciousBen/playr/refs/heads/main/assets/app.png "Playr author mode")
 
-Playr is an Electron-based audio player for the purpose of playing audiobooks. It is fully portable, so the .exe in the releases can run as a standalone application.
+Playr is an Electron-based audio player for the purpose of playing long form audio content, such as audiobooks, radio or podcasts. It is fully portable, so the .exe in [the releases](https://github.com/TenaciousBen/playr/releases) can run as a standalone application.
 
 ## Features
 

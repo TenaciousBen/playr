@@ -12,6 +12,7 @@ import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/us
 import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
+import { DropdownButton } from "@/src/renderer/shared/DropdownButton";
 
 function formatHoursMinutes(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -279,27 +280,26 @@ export function CollectionFeature() {
           <p className="text-gray-400 mt-1">{loading ? "Loading…" : `${books.length} audiobook(s)`}</p>
         </div>
         <div className="flex items-center space-x-3">
-          <div className="flex bg-gray-700 rounded-lg overflow-hidden border border-gray-600">
-            <button
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white transition-colors text-sm font-medium flex items-center space-x-2"
-              onClick={() => {
-                if (!collection) return;
-                void player.actions.playCollection(collection.id, sortedBooks.map((b) => b.id));
-              }}
-              disabled={!collection || sortedBooks.length === 0}
-            >
-              <i className="fas fa-play"></i>
-              <span>Play Collection</span>
-            </button>
-          </div>
-          <button
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-60"
-            disabled={!collection}
-            title="Remove collection"
-            onClick={() => setConfirmRemoveOpen(true)}
-          >
-            <i className="fas fa-trash mr-2"></i>Remove Collection
-          </button>
+          <DropdownButton
+            label="Play Collection"
+            title="Collection actions"
+            primaryIconClassName="fas fa-play"
+            primaryDisabled={!collection || sortedBooks.length === 0}
+            dropdownDisabled={!collection}
+            onPrimaryClick={() => {
+              if (!collection) return;
+              void player.actions.playCollection(collection.id, sortedBooks.map((b) => b.id));
+            }}
+            secondaryActions={[
+              {
+                label: "Remove Collection",
+                iconClassName: "fas fa-trash",
+                variant: "danger",
+                disabled: !collection,
+                onClick: () => setConfirmRemoveOpen(true)
+              }
+            ]}
+          />
           <select
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={settings.sortBy}

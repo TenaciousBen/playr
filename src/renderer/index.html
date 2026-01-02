@@ -35,6 +35,11 @@
         display: none;
       }
       /* Make drag interactions feel native: prevent accidental text selection */
+      html,
+      body,
+      #root {
+        min-width: 800px;
+      }
       body {
         -webkit-user-select: none;
         user-select: none;

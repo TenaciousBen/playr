@@ -9,6 +9,7 @@ export function createMainWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 750,
+    minWidth: 800,
     show: true,
     icon: path.join(app.getAppPath(), "assets", "icon.ico"),
     webPreferences: {

@@ -11,6 +11,7 @@ import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/us
 import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
+import { DropdownButton } from "@/src/renderer/shared/DropdownButton";
 
 function formatHoursMinutes(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -55,8 +56,38 @@ export function AuthorFeature() {
   const [creating, setCreating] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
-  const [collectionMenuOpen, setCollectionMenuOpen] = useState(false);
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+
+  const createAuthorCollection = useCallback(async () => {
+    if (creating) return;
+    if (!author) return;
+    if (books.length === 0) return;
+
+    setCreating(true);
+    try {
+      const existing = await window.audioplayer.collections.list();
+      const existingNames = new Set(existing.map((c) => c.name.trim().toLowerCase()));
+
+      const base = author.trim() || "New Collection";
+      let name = base;
+      for (let i = 2; existingNames.has(name.trim().toLowerCase()); i++) {
+        name = `${base} (${i})`;
+      }
+
+      const created = await window.audioplayer.collections.create(name);
+      await window.audioplayer.collections.setBooks(
+        created.id,
+        books.map((b) => b.id)
+      );
+      window.dispatchEvent(new Event("audioplayer:collections-changed"));
+      navigate(`/collections/${encodeURIComponent(created.id)}`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[author] failed to create collection", e);
+    } finally {
+      setCreating(false);
+    }
+  }, [author, books, creating, navigate]);
 
   const refresh = useCallback(async () => {
     if (!author) return;
@@ -81,24 +112,6 @@ export function AuthorFeature() {
     window.addEventListener("audioplayer:library-changed", onChanged);
     return () => window.removeEventListener("audioplayer:library-changed", onChanged);
   }, [refresh]);
-
-  useEffect(() => {
-    if (!collectionMenuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.("#author-collection-menu")) return;
-      setCollectionMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCollectionMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [collectionMenuOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -293,35 +306,22 @@ export function AuthorFeature() {
         </div>
         <div className="flex items-center space-x-3">
           <div className="relative">
-            <button
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-60 flex items-center space-x-2"
-              disabled={creating || books.length === 0}
-              onClick={() => setCollectionMenuOpen((v) => !v)}
+            <DropdownButton
+              label={creating ? "Creating…" : "Create Collection"}
               title="Collection actions"
-            >
-              <i className="fas fa-plus"></i>
-              <span>Create Collection</span>
-              <i className="fas fa-chevron-down text-xs opacity-90"></i>
-            </button>
-
-            {collectionMenuOpen ? (
-              <div
-                id="author-collection-menu"
-                className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
-              >
-                <button
-                  className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 transition-colors flex items-center space-x-3"
-                  onClick={() => {
-                    setCollectionMenuOpen(false);
+              primaryDisabled={creating || books.length === 0}
+              onPrimaryClick={() => void createAuthorCollection()}
+              secondaryActions={[
+                {
+                  label: "Add to existing collection…",
+                  iconClassName: "fas fa-layer-group",
+                  onClick: () => {
                     setAddToCollectionBook(null);
                     setAddToCollectionOpen(true);
-                  }}
-                >
-                  <i className="fas fa-layer-group text-xs"></i>
-                  <span>Add to existing collection…</span>
-                </button>
-              </div>
-            ) : null}
+                  }
+                }
+              ]}
+            />
           </div>
           <select
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
