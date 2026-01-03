@@ -101,8 +101,11 @@ export async function ingestPathsToAudiobooks(
       const res = await extractAudiobookMetadata(b.id, first);
       if (typeof res.durationSeconds === "number" && Number.isFinite(res.durationSeconds) && res.durationSeconds > 0) {
         b.durationSeconds = res.durationSeconds;
-        // Since we model "one file = one audiobook", also store chapter duration for convenience.
-        if (b.chapters[0]) b.chapters[0].durationSeconds = res.durationSeconds;
+        // If we don't have chapter markers, treat "chapter 0" as full-file duration.
+        if (b.chapters[0] && !res.chapters?.length) b.chapters[0].durationSeconds = res.durationSeconds;
+      }
+      if (res.chapters && res.chapters.length > 0) {
+        b.chapters = res.chapters;
       }
       if (res.metadata) {
         b.metadata = res.metadata;

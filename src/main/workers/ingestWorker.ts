@@ -81,19 +81,19 @@ function fileToAudiobook(filePath: string): Audiobook {
   };
 }
 
-let parseFileFn: null | ((filePath: string) => Promise<any>) = null;
+let parseFileFn: null | ((filePath: string, opts?: any) => Promise<any>) = null;
 async function getParseFile() {
   if (parseFileFn) return parseFileFn;
   // Keep compatibility with ESM-only versions of music-metadata.
   const mm = await import("music-metadata");
-  parseFileFn = mm.parseFile as unknown as (filePath: string) => Promise<any>;
+  parseFileFn = mm.parseFile as unknown as (filePath: string, opts?: any) => Promise<any>;
   return parseFileFn!;
 }
 
 async function parseMetadata(audiobookId: string, filePath: string) {
   try {
     const parseFile = await getParseFile();
-    const mm = await parseFile(filePath);
+    const mm = await parseFile(filePath, { includeChapters: true });
 
     const title = mm.common.album || mm.common.title || undefined;
     const subtitle = mm.common.subtitle;
@@ -119,10 +119,42 @@ async function parseMetadata(audiobookId: string, filePath: string) {
     const durationSeconds =
       typeof mm.format.duration === "number" && Number.isFinite(mm.format.duration) ? mm.format.duration : undefined;
 
+    let chapters: any[] | undefined;
+    if (Array.isArray(mm.format?.chapters) && mm.format.chapters.length > 0) {
+      const starts = mm.format.chapters
+        .map((c: any) => {
+          const start = Number(c?.start);
+          const scale = Number(c?.timeScale);
+          if (!Number.isFinite(start) || !Number.isFinite(scale) || scale <= 0) return 0;
+          return start / scale;
+        })
+        .map((s: number) => Math.max(0, s));
+
+      chapters = mm.format.chapters.map((c: any, idx: number) => {
+        const startSeconds = starts[idx] ?? 0;
+        const nextStart = starts[idx + 1];
+        const dur =
+          typeof nextStart === "number"
+            ? Math.max(0, nextStart - startSeconds)
+            : typeof durationSeconds === "number"
+              ? Math.max(0, durationSeconds - startSeconds)
+              : undefined;
+        const rawTitle = String(c?.title ?? "").trim();
+        return {
+          index: idx,
+          title: rawTitle || `Chapter ${idx + 1}`,
+          filePath,
+          startSeconds,
+          durationSeconds: typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : undefined
+        };
+      });
+    }
+
     const hasAny = !!title || !!subtitle || !!(authors && authors.length) || !!coverImagePath;
     return {
       metadata: hasAny ? { title, subtitle, authors, coverImagePath } : undefined,
-      durationSeconds
+      durationSeconds,
+      chapters
     };
   } catch {
     return {};
@@ -153,7 +185,11 @@ async function run() {
     const res = await parseMetadata(b.id, f);
     if (typeof res.durationSeconds === "number" && Number.isFinite(res.durationSeconds) && res.durationSeconds > 0) {
       b.durationSeconds = res.durationSeconds;
-      if (b.chapters?.[0]) b.chapters[0].durationSeconds = res.durationSeconds;
+      if (b.chapters?.[0] && !(res as any).chapters?.length) b.chapters[0].durationSeconds = res.durationSeconds;
+    }
+    const extracted = (res as any).chapters;
+    if (Array.isArray(extracted) && extracted.length > 0) {
+      b.chapters = extracted;
     }
     if (res.metadata) {
       b.metadata = res.metadata;

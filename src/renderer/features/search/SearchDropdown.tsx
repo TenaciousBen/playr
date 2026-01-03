@@ -10,12 +10,14 @@ export type AuthorHit = {
 export function SearchDropdown({
   open,
   query,
+  matchCount,
   collectionHits,
   authorHits,
   titleHits,
   onClose,
   onClearSearch,
   onBrowseLibrary,
+  onViewMatches,
   onSelectCollection,
   onSelectAuthor,
   onSelectTitle,
@@ -23,12 +25,14 @@ export function SearchDropdown({
 }: {
   open: boolean;
   query: string;
+  matchCount: number;
   collectionHits: Array<{ id: string; name: string; count: number }>;
   authorHits: AuthorHit[];
   titleHits: Audiobook[];
   onClose: () => void;
   onClearSearch: () => void;
   onBrowseLibrary: () => void;
+  onViewMatches: () => void;
   onSelectCollection: (collectionId: string) => void;
   onSelectAuthor: (authorName: string) => void;
   onSelectTitle: (bookId: string) => void;
@@ -54,7 +58,36 @@ export function SearchDropdown({
     };
   }, [onClose, open]);
 
-  const hasAny = collectionHits.length > 0 || authorHits.length > 0 || titleHits.length > 0;
+  const hasAny = matchCount > 0 || collectionHits.length > 0 || authorHits.length > 0 || titleHits.length > 0;
+
+  const matchesSection = useMemo(() => {
+    if (matchCount <= 0) return null;
+    return (
+      <div className="border-b border-gray-700">
+        <div className="px-4 py-3 bg-gray-750">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Matches</h3>
+            <span className="text-xs text-gray-500">{matchCount} audiobook(s)</span>
+          </div>
+        </div>
+        <div className="py-2">
+          <div
+            className="px-4 py-3 hover:bg-gray-700 cursor-pointer transition-colors flex items-center space-x-3"
+            onClick={onViewMatches}
+          >
+            <div className="w-10 h-10 rounded-lg bg-gray-700 flex items-center justify-center flex-shrink-0">
+              <i className="fas fa-search text-gray-200 text-sm"></i>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white">View matches for “{query}”</p>
+              <p className="text-xs text-gray-400">Titles, authors, and file paths</p>
+            </div>
+            <i className="fas fa-chevron-right text-gray-500 text-xs"></i>
+          </div>
+        </div>
+      </div>
+    );
+  }, [matchCount, onViewMatches, query]);
 
   const collectionsSection = useMemo(() => {
     if (collectionHits.length === 0) return null;
@@ -200,15 +233,16 @@ export function SearchDropdown({
     >
       {hasAny ? (
         <>
+          {matchesSection}
           {collectionsSection}
           {authorsSection}
           {titlesSection}
           <div className="px-4 py-3 bg-gray-750 border-t border-gray-700">
             <button
               className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors flex items-center space-x-2"
-              onClick={onBrowseLibrary}
+              onClick={onViewMatches}
             >
-              <span>View all results</span>
+              <span>View all matches</span>
               <i className="fas fa-arrow-right text-xs"></i>
             </button>
           </div>

@@ -33,6 +33,7 @@ function formatDuration(seconds?: number) {
 export function AudiobookList({
   books,
   onPlay,
+  onOpenBook,
   onContextMenu,
   onToggleFavorite,
   playbackById,
@@ -41,6 +42,7 @@ export function AudiobookList({
 }: {
   books: Audiobook[];
   onPlay: (b: Audiobook) => void;
+  onOpenBook: (b: Audiobook) => void;
   onContextMenu?: (e: React.MouseEvent, b: Audiobook) => void;
   onToggleFavorite?: (b: Audiobook, next: boolean) => void;
   playbackById?: Record<string, { secondsIntoChapter?: number } | null>;
@@ -51,12 +53,12 @@ export function AudiobookList({
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden">
       <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-gray-750 border-b border-gray-700 text-sm font-semibold text-gray-400">
+        <div className="col-span-1 text-center">Play</div>
         <div className="col-span-4">Title</div>
         <div className="col-span-3">Author</div>
         <div className="col-span-2">Duration</div>
         <div className="col-span-1 text-center">Progress</div>
         <div className="col-span-1 text-center">Favorite</div>
-        <div className="col-span-1 text-center">Play</div>
       </div>
 
       {books.map((b) => {
@@ -117,8 +119,20 @@ export function AudiobookList({
               (window as any).__playrReorderDragId = null;
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
-            onClick={() => onPlay(b)}
+            onClick={() => onOpenBook(b)}
           >
+            <div className="col-span-1 text-center">
+              <button
+                className="text-blue-500 hover:text-blue-400 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay(b);
+                }}
+                title="Play"
+              >
+                <i className="fas fa-play-circle text-xl"></i>
+              </button>
+            </div>
             <div className="col-span-4 flex items-center space-x-3">
               {b.metadata?.coverImagePath ? (
                 <img className="w-12 h-12 object-cover rounded" src={toFileUrl(b.metadata.coverImagePath)} alt="cover" />
@@ -151,18 +165,6 @@ export function AudiobookList({
                   <i className={isFav ? "fas fa-heart" : "far fa-heart"}></i>
                 </button>
               ) : null}
-            </div>
-            <div className="col-span-1 text-center">
-              <button
-                className="text-blue-500 hover:text-blue-400 transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPlay(b);
-                }}
-                title="Play"
-              >
-                <i className="fas fa-play-circle text-xl"></i>
-              </button>
             </div>
           </div>
         );

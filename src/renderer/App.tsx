@@ -2,8 +2,10 @@ import React from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/src/renderer/features/shell/AppShell";
 import { AuthorFeature } from "@/src/renderer/features/author/AuthorFeature";
+import { BookFeature } from "@/src/renderer/features/book/BookFeature";
 import { CollectionFeature } from "@/src/renderer/features/collections/CollectionFeature";
 import { LibraryFeature } from "@/src/renderer/features/library/LibraryFeature";
+import { MatchesFeature } from "@/src/renderer/features/matches/MatchesFeature";
 import { SettingsFeature } from "@/src/renderer/features/settings/SettingsFeature";
 
 export function App() {
@@ -13,6 +15,8 @@ export function App() {
         <Route path="/" element={<Navigate to="/library" replace />} />
         <Route path="/library" element={<LibraryFeature />} />
         <Route path="/author/:authorName" element={<AuthorFeature />} />
+        <Route path="/book/:bookId" element={<BookFeature />} />
+        <Route path="/matches/:query" element={<MatchesFeature />} />
         <Route path="/collections/:collectionId" element={<CollectionFeature />} />
         <Route path="/recent" element={<LibraryFeature mode="recent" />} />
         <Route path="/reading" element={<LibraryFeature mode="reading" />} />

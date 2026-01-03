@@ -383,6 +383,7 @@ export function AuthorFeature() {
           <AudiobookList
             books={sortedBooks}
             onPlay={(b) => void player.actions.playBook(b)}
+            onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -404,7 +405,7 @@ export function AuthorFeature() {
             books={sortedBooks}
             subtitle={(b) => `${b.chapters.length} file(s)`}
             onPlay={(b) => void player.actions.playBook(b)}
-            onOpenDetails={(b) => void openDetails(b.id)}
+            onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);

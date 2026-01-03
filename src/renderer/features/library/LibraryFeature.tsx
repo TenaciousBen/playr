@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { PlaybackState } from "@/src/shared/models/playback";
 import { ContextMenu } from "@/src/renderer/features/library/ContextMenu";
@@ -39,6 +40,7 @@ export function LibraryFeature({
 }: {
   mode?: "library" | "recent" | "reading" | "favorites";
 }) {
+  const navigate = useNavigate();
   const player = usePlayer();
   const [books, setBooks] = useState<Audiobook[]>([]);
   const [loading, setLoading] = useState(true);
@@ -333,6 +335,7 @@ export function LibraryFeature({
           <AudiobookList
             books={sortedShown}
             onPlay={(b) => void player.actions.playBook(b)}
+            onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -354,7 +357,7 @@ export function LibraryFeature({
             books={sortedShown}
             subtitle={(b) => `${b.chapters.length} file(s)`}
             onPlay={(b) => void player.actions.playBook(b)}
-            onOpenDetails={(b) => void openDetails(b.id)}
+            onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);

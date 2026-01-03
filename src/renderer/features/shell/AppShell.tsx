@@ -41,6 +41,7 @@ function NavItem({
 export function AppShell() {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [matchCount, setMatchCount] = useState(0);
   const [collectionHits, setCollectionHits] = useState<Array<{ id: string; name: string; count: number }>>([]);
   const [authorHits, setAuthorHits] = useState<Array<{ name: string; count: number }>>([]);
   const [titleHits, setTitleHits] = useState<Audiobook[]>([]);
@@ -118,6 +119,7 @@ export function AppShell() {
       const q = search.trim();
       if (!q) {
         if (!alive) return;
+        setMatchCount(0);
         setCollectionHits([]);
         setAuthorHits([]);
         setTitleHits([]);
@@ -134,6 +136,15 @@ export function AppShell() {
       if (!alive) return;
 
       const qq = q.toLowerCase();
+      const matches = lib.filter((b) => {
+        const title = String(b.metadata?.title ?? b.displayName ?? "");
+        const subtitle = String(b.metadata?.subtitle ?? "");
+        const authors = (b.metadata?.authors ?? []).join(", ");
+        const root = String(b.rootFolderPath ?? "");
+        const files = (b.chapters ?? []).map((c) => c.filePath).join("\n");
+        const hay = `${title}\n${subtitle}\n${authors}\n${root}\n${files}`.toLowerCase();
+        return hay.includes(qq);
+      });
       const counts = new Map<string, number>();
       for (const b of lib) {
         for (const a of (b.metadata?.authors ?? []) as any[]) {
@@ -178,6 +189,7 @@ export function AppShell() {
       setCollectionHits(collectionMatches);
       setAuthorHits(authors);
       setTitleHits(titlesOnly);
+      setMatchCount(matches.length);
     })();
 
     return () => {
@@ -327,6 +339,7 @@ export function AppShell() {
             <SearchDropdown
               open={searchOpen && search.trim().length > 0}
               query={search.trim()}
+              matchCount={matchCount}
               collectionHits={collectionHits}
               authorHits={authorHits}
               titleHits={titleHits}
@@ -339,6 +352,12 @@ export function AppShell() {
                 navigate("/library");
                 setSearchOpen(false);
               }}
+              onViewMatches={() => {
+                const q = search.trim();
+                if (!q) return;
+                navigate(`/matches/${encodeURIComponent(q)}`);
+                setSearchOpen(false);
+              }}
               onSelectCollection={(collectionId) => {
                 navigate(`/collections/${encodeURIComponent(collectionId)}`);
                 setSearchOpen(false);
@@ -348,9 +367,7 @@ export function AppShell() {
                 setSearchOpen(false);
               }}
               onSelectTitle={(bookId) => {
-                // Navigate to library (we don't have a separate details route yet)
-                // and keep playback on user click in grid.
-                navigate("/library");
+                navigate(`/book/${encodeURIComponent(bookId)}`);
                 setSearchOpen(false);
               }}
               onPlayTitle={(bookId) => {
@@ -359,7 +376,7 @@ export function AppShell() {
                     detail: { bookId }
                   })
                 );
-                navigate("/library");
+                navigate(`/book/${encodeURIComponent(bookId)}`);
                 setSearchOpen(false);
               }}
             />

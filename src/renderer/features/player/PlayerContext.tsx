@@ -32,6 +32,8 @@ export type PlayerState = {
 
 export type PlayerActions = {
   playBook: (book: Audiobook) => Promise<void>;
+  playBookFromStart: (book: Audiobook) => Promise<void>;
+  playBookFromChapter: (book: Audiobook, chapterIndex: number) => Promise<void>;
   playCollection: (collectionId: string, audiobookIds: string[]) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   play: () => Promise<void>;
@@ -65,6 +67,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [queue, setQueue] = useState<PlayerState["queue"]>(null);
 
   const persistTimer = useRef<number | null>(null);
+  const isPlayingRef = useRef(false);
+  const advancingRef = useRef(false);
 
   const persistState = useCallback(
     async (
@@ -74,11 +78,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     ) => {
       if (!nowPlaying || !audioRef.current) return;
       const a = audioRef.current;
+      const chStart = nowPlaying.book.chapters[nowPlaying.chapterIndex]?.startSeconds ?? 0;
+      const secondsIntoChapter = Math.max(0, (a.currentTime || 0) - chStart);
 
       const basePosition: PlaybackPosition = {
         audiobookId: nowPlaying.book.id,
         chapterIndex: nowPlaying.chapterIndex,
-        secondsIntoChapter: a.currentTime
+        secondsIntoChapter
       };
 
       const base: PlaybackState = {
@@ -136,12 +142,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       setNowPlaying({ book, chapterIndex });
       setCurrentTime(0);
-      setDuration(0);
+      setDuration(ch.durationSeconds ?? 0);
 
       const applyResume = () => {
         if (typeof resumeSeconds === "number" && Number.isFinite(resumeSeconds)) {
           try {
-            a.currentTime = Math.max(0, resumeSeconds);
+            const start = ch.startSeconds ?? 0;
+            a.currentTime = Math.max(0, start + Math.max(0, resumeSeconds));
           } catch {
             // ignore
           }
@@ -163,11 +170,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         try {
           await a.play();
           setIsPlaying(true);
+          isPlayingRef.current = true;
         } catch {
           setIsPlaying(false);
+          isPlayingRef.current = false;
         }
       } else {
         setIsPlaying(false);
+        isPlayingRef.current = false;
       }
 
       void persistState();
@@ -195,6 +205,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       void persistState({ queue: null });
     },
     [loadChapter, persistState, queue]
+  );
+
+  const playBookFromChapter = useCallback(
+    async (book: Audiobook, chapterIndex: number) => {
+      if (queue) setQueue(null);
+      setRateState(1);
+      await loadChapter(book, Math.max(0, Math.min(chapterIndex, book.chapters.length - 1)), 0, true);
+      void persistState({ queue: null });
+    },
+    [loadChapter, persistState, queue]
+  );
+
+  const playBookFromStart = useCallback(
+    async (book: Audiobook) => {
+      await playBookFromChapter(book, 0);
+    },
+    [playBookFromChapter]
   );
 
   const playCollection = useCallback(
@@ -226,19 +253,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // direct access to this context instance.
   useEffect(() => {
     const onPlayRequested = (e: Event) => {
-      const ce = e as CustomEvent<{ bookId?: string }>;
+      const ce = e as CustomEvent<{ bookId?: string; chapterIndex?: number }>;
       const bookId = ce.detail?.bookId;
       if (!bookId) return;
+      const chapterIndex = ce.detail?.chapterIndex;
       void (async () => {
         const lib = await window.audioplayer.library.list();
         const book = lib.find((b) => b.id === bookId);
         if (!book) return;
-        await playBook(book);
+        if (typeof chapterIndex === "number" && Number.isFinite(chapterIndex)) {
+          await playBookFromChapter(book, chapterIndex);
+        } else {
+          await playBook(book);
+        }
       })();
     };
     window.addEventListener("audioplayer:play-book", onPlayRequested as EventListener);
     return () => window.removeEventListener("audioplayer:play-book", onPlayRequested as EventListener);
-  }, [playBook]);
+  }, [playBook, playBookFromChapter]);
 
   // On startup, initialize the player to the last opened audiobook (paused).
   useEffect(() => {
@@ -365,14 +397,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     (seconds: number) => {
       const a = ensureAudio();
       try {
-        a.currentTime = Math.max(0, seconds);
+        const start = nowPlaying?.book.chapters[nowPlaying.chapterIndex]?.startSeconds ?? 0;
+        a.currentTime = Math.max(0, start + Math.max(0, seconds));
       } catch {
         // ignore
       }
-      setCurrentTime(a.currentTime);
+      const start = nowPlaying?.book.chapters[nowPlaying.chapterIndex]?.startSeconds ?? 0;
+      setCurrentTime(Math.max(0, (a.currentTime || 0) - start));
       void persistState();
     },
-    [ensureAudio, persistState]
+    [ensureAudio, nowPlaying, persistState]
   );
 
   const skipBy = useCallback(
@@ -466,12 +500,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const a = ensureAudio();
 
     const onTime = () => {
-      setCurrentTime(a.currentTime || 0);
-      setDuration(Number.isFinite(a.duration) ? a.duration : 0);
+      const start = nowPlaying?.book.chapters[nowPlaying.chapterIndex]?.startSeconds ?? 0;
+      const end =
+        nowPlaying?.book.chapters[nowPlaying.chapterIndex + 1]?.startSeconds ??
+        (Number.isFinite(a.duration) ? a.duration : 0);
+      const rel = Math.max(0, (a.currentTime || 0) - start);
+      const relDur = Math.max(0, end - start);
+      setCurrentTime(rel);
+      setDuration(relDur);
+
+      // If this is an embedded-chapters book (chapters share a file), auto-advance at chapter boundary.
+      const chapters = nowPlaying?.book.chapters ?? [];
+      const embedded =
+        chapters.length > 1 &&
+        chapters.every((c) => c.filePath === chapters[0]?.filePath) &&
+        chapters.some((c) => (c.startSeconds ?? 0) > 0);
+      const ch = nowPlaying?.book.chapters[nowPlaying.chapterIndex];
+      if (
+        embedded &&
+        ch &&
+        relDur > 0 &&
+        isPlayingRef.current &&
+        !advancingRef.current
+      ) {
+        const absEnd = start + relDur;
+        if ((a.currentTime || 0) >= absEnd - 0.05) {
+          advancingRef.current = true;
+          void nextChapter().finally(() => {
+            advancingRef.current = false;
+          });
+        }
+      }
     };
     const onDuration = () => {
       const dur = Number.isFinite(a.duration) ? a.duration : 0;
-      setDuration(dur);
+      // Duration shown in UI is chapter-relative; we compute it in onTime(). Keep this handler for persistence only.
       // Best-effort: persist full runtime so grids can compute accurate % progress.
       if (nowPlaying && dur > 0) {
         const existing = nowPlaying.book.durationSeconds ?? 0;
@@ -484,6 +547,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    const onPlayRef = () => {
+      isPlayingRef.current = true;
+      onPlay();
+    };
+    const onPauseRef = () => {
+      isPlayingRef.current = false;
+      onPause();
+    };
     const onEnded = () => {
       // Auto-advance chapter if possible.
       void nextChapter();
@@ -493,8 +564,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     a.addEventListener("durationchange", onTime);
     a.addEventListener("loadedmetadata", onDuration);
     a.addEventListener("durationchange", onDuration);
-    a.addEventListener("play", onPlay);
-    a.addEventListener("pause", onPause);
+    a.addEventListener("play", onPlayRef);
+    a.addEventListener("pause", onPauseRef);
     a.addEventListener("ended", onEnded);
 
     return () => {
@@ -502,8 +573,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       a.removeEventListener("durationchange", onTime);
       a.removeEventListener("loadedmetadata", onDuration);
       a.removeEventListener("durationchange", onDuration);
-      a.removeEventListener("play", onPlay);
-      a.removeEventListener("pause", onPause);
+      a.removeEventListener("play", onPlayRef);
+      a.removeEventListener("pause", onPauseRef);
       a.removeEventListener("ended", onEnded);
     };
   }, [ensureAudio, nextChapter, nowPlaying]);
@@ -533,6 +604,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const actions = useMemo<PlayerActions>(
     () => ({
       playBook,
+      playBookFromStart,
+      playBookFromChapter,
       playCollection,
       togglePlayPause,
       play,
@@ -550,6 +623,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       pause,
       play,
       playBook,
+      playBookFromChapter,
+      playBookFromStart,
       playCollection,
       prevChapter,
       seek,

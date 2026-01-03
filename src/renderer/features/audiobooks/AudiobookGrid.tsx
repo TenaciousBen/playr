@@ -26,7 +26,7 @@ export function AudiobookGrid({
   books,
   subtitle,
   onPlay,
-  onOpenDetails,
+  onOpenBook,
   onContextMenu,
   onToggleFavorite,
   playbackById,
@@ -36,7 +36,7 @@ export function AudiobookGrid({
   books: Audiobook[];
   subtitle?: (b: Audiobook) => React.ReactNode;
   onPlay: (b: Audiobook) => void;
-  onOpenDetails?: (b: Audiobook) => void;
+  onOpenBook: (b: Audiobook) => void;
   onContextMenu?: (e: React.MouseEvent, b: Audiobook) => void;
   onToggleFavorite?: (b: Audiobook, next: boolean) => void;
   playbackById?: Record<string, { secondsIntoChapter?: number } | null>;
@@ -107,8 +107,7 @@ export function AudiobookGrid({
               (window as any).__playrReorderDragId = null;
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
-            onClick={() => onPlay(b)}
-            onDoubleClick={() => onOpenDetails?.(b)}
+            onClick={() => onOpenBook(b)}
           >
             <div className="relative mb-3">
               {b.metadata?.coverImagePath ? (
@@ -123,9 +122,16 @@ export function AudiobookGrid({
                 </div>
               )}
 
-              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center">
-                <i className="fas fa-play text-white text-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></i>
-              </div>
+              <button
+                className="absolute top-2 left-2 w-8 h-8 bg-gray-900 bg-opacity-70 rounded-full flex items-center justify-center hover:bg-opacity-90 transition-all opacity-0 group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay(b);
+                }}
+                title="Play"
+              >
+                <i className="fas fa-play text-white text-sm"></i>
+              </button>
 
               {showPct ? (
                 <div
