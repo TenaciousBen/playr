@@ -571,7 +571,7 @@ export function AppShell() {
                       <div
                         key={c.id}
                         className={[
-                          "flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer",
+                          "group flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer",
                           dragOverCollectionId === c.id ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"
                         ].join(" ")}
                         onClick={() => navigate(`/collections/${encodeURIComponent(c.id)}`)}
@@ -604,7 +604,28 @@ export function AppShell() {
                           void addBookToCollection(c.id, id);
                         }}
                       >
-                        <span className="text-sm">{c.name}</span>
+                        <div className="flex items-center min-w-0">
+                          <button
+                            className={[
+                              "w-7 h-7 rounded-md flex items-center justify-center mr-2 transition-colors flex-shrink-0",
+                              "bg-gray-900/40 hover:bg-gray-900/70 text-gray-200",
+                              "opacity-0 group-hover:opacity-100"
+                            ].join(" ")}
+                            title="Play collection"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              window.dispatchEvent(
+                                new CustomEvent("audioplayer:play-collection", {
+                                  detail: { collectionId: c.id }
+                                })
+                              );
+                            }}
+                          >
+                            <i className="fas fa-play text-[10px] ml-[1px]"></i>
+                          </button>
+                          <span className="text-sm truncate">{c.name}</span>
+                        </div>
                         <span className={dragOverCollectionId === c.id ? "text-xs text-white/90" : "text-xs text-gray-500"}>
                           {c.audiobookIds.length}
                         </span>

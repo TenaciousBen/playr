@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 import appIcon from "@/assets/icon.ico";
@@ -14,6 +15,7 @@ function formatClock(seconds: number) {
 
 export function PlayerFooter() {
   const { state, actions } = usePlayer();
+  const navigate = useNavigate();
   const book = state.nowPlaying?.book ?? null;
   const chapterIndex = state.nowPlaying?.chapterIndex ?? 0;
   const hasNextChapter = !!book && chapterIndex < book.chapters.length - 1;
@@ -28,22 +30,51 @@ export function PlayerFooter() {
     return Math.max(0, Math.min(1, state.currentTime / state.duration));
   }, [state.currentTime, state.duration]);
 
+  const chapterMarkers = useMemo(() => {
+    if (!book) return [];
+    if (!state.duration || state.duration <= 0) return [];
+    const chapters = book.chapters ?? [];
+    if (chapters.length <= 1) return [];
+    const fp = chapters[0]?.filePath;
+    const embedded =
+      !!fp && chapters.every((c) => c.filePath === fp) && chapters.some((c) => (c.startSeconds ?? 0) > 0);
+    if (!embedded) return [];
+
+    return chapters
+      .map((c) => c.startSeconds ?? 0)
+      .filter((s) => typeof s === "number" && Number.isFinite(s) && s > 0)
+      .map((s) => Math.max(0, Math.min(1, s / state.duration)))
+      .filter((pct) => pct > 0.001 && pct < 0.999);
+  }, [book, state.duration]);
+
+  const primaryAuthor = book?.metadata?.authors?.[0] ?? "";
+
   return (
     <footer className="bg-gray-800 border-t border-gray-700 px-6 py-4">
       <div className="flex items-center justify-between">
         {/* Currently Playing Info */}
         <div className="flex items-center space-x-4 w-1/3">
-          {book?.metadata?.coverImagePath ? (
-            <img
-              className="w-12 h-12 object-cover rounded"
-              src={toFileUrl(book.metadata.coverImagePath)}
-              alt="cover"
-            />
-          ) : (
-            <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center">
-              <img src={appIcon} alt="Playr" className="w-7 h-7 opacity-90" />
-            </div>
-          )}
+          <button
+            className="flex-shrink-0"
+            title={book ? "Open audiobook" : ""}
+            disabled={!book}
+            onClick={() => {
+              if (!book) return;
+              navigate(`/book/${encodeURIComponent(book.id)}`);
+            }}
+          >
+            {book?.metadata?.coverImagePath ? (
+              <img
+                className="w-12 h-12 object-cover rounded"
+                src={toFileUrl(book.metadata.coverImagePath)}
+                alt="cover"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center">
+                <img src={appIcon} alt="Playr" className="w-7 h-7 opacity-90" />
+              </div>
+            )}
+          </button>
           <div className="flex-1">
             {state.queue ? (
               <div className="flex items-center space-x-2 mb-1">
@@ -51,16 +82,50 @@ export function PlayerFooter() {
                 <span className="text-xs text-gray-400">{state.queue.collectionName}</span>
               </div>
             ) : null}
-            <h4 className="text-sm font-medium">{book ? (book.metadata?.title ?? book.displayName) : "—"}</h4>
+            <button
+              className="text-sm font-medium text-left hover:underline disabled:opacity-60"
+              disabled={!book}
+              title={book ? "Open audiobook" : ""}
+              onClick={() => {
+                if (!book) return;
+                navigate(`/book/${encodeURIComponent(book.id)}`);
+              }}
+            >
+              {book ? (book.metadata?.title ?? book.displayName) : "—"}
+            </button>
             <p className="text-xs text-gray-400">
               {book
                 ? state.queue
-                  ? `${book.metadata?.authors?.join(", ") ?? ""}${
-                      book.metadata?.authors?.length ? " · " : ""
-                    }Book ${state.queue.index + 1} of ${state.queue.audiobookIds.length}`
-                  : `${book.metadata?.authors?.join(", ") ?? ""}${book.metadata?.authors?.length ? " • " : ""}Chapter ${
-                      chapterIndex + 1
-                    }`
+                  ? (
+                      <>
+                        {primaryAuthor ? (
+                          <button
+                            className="hover:underline"
+                            onClick={() => navigate(`/author/${encodeURIComponent(primaryAuthor)}`)}
+                            title="Open author"
+                          >
+                            {primaryAuthor}
+                          </button>
+                        ) : null}
+                        {primaryAuthor ? " · " : null}
+                        {`Book ${state.queue.index + 1} of ${state.queue.audiobookIds.length}`}
+                      </>
+                    )
+                  : (
+                      <>
+                        {primaryAuthor ? (
+                          <button
+                            className="hover:underline"
+                            onClick={() => navigate(`/author/${encodeURIComponent(primaryAuthor)}`)}
+                            title="Open author"
+                          >
+                            {primaryAuthor}
+                          </button>
+                        ) : null}
+                        {primaryAuthor ? " • " : null}
+                        {`Chapter ${chapterIndex + 1}`}
+                      </>
+                    )
                 : "Not playing"}
             </p>
           </div>
@@ -115,7 +180,7 @@ export function PlayerFooter() {
           <div className="flex items-center space-x-3 w-full max-w-md">
             <span className="text-xs text-gray-400">{formatClock(state.currentTime)}</span>
             <div
-              className="flex-1 bg-gray-600 h-1 rounded-full cursor-pointer"
+              className="flex-1 bg-gray-600 h-1 rounded-full cursor-pointer relative"
               onClick={(e) => {
                 if (!state.duration || state.duration <= 0) return;
                 const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -124,6 +189,16 @@ export function PlayerFooter() {
               }}
               title="Seek"
             >
+              {/* Chapter markers (embedded-chapters books only) */}
+              <div className="absolute inset-0 pointer-events-none">
+                {chapterMarkers.map((pct, idx) => (
+                  <div
+                    key={idx}
+                    className="absolute top-[-3px] w-[2px] h-[10px] bg-white/35 rounded"
+                    style={{ left: `${pct * 100}%`, transform: "translateX(-1px)" }}
+                  ></div>
+                ))}
+              </div>
               <div className="bg-blue-500 h-1 rounded-full" style={{ width: `${progressPct * 100}%` }}></div>
             </div>
             <span className="text-xs text-gray-400">{formatClock(state.duration)}</span>
