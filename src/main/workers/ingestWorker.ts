@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import type { Audiobook } from "@/src/shared/models/audiobook";
+import { extractChaptersFromMp4ChapTrack } from "@/src/main/library/mp4Chapters";
 
 type WorkerData = {
   inputPaths: string[];
@@ -148,6 +149,20 @@ async function parseMetadata(audiobookId: string, filePath: string) {
           durationSeconds: typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : undefined
         };
       });
+    }
+
+    // Fallback for M4B w/ `mdat` before `moov` (music-metadata doesn't extract chap-track chapters in that layout).
+    if ((!chapters || chapters.length === 0) && String(mm.format?.container ?? "").toLowerCase().includes("m4b")) {
+      const extracted = await extractChaptersFromMp4ChapTrack(filePath);
+      if (extracted?.length) {
+        chapters = extracted.map((c, idx) => ({
+          index: idx,
+          title: c.title,
+          filePath,
+          startSeconds: c.startSeconds,
+          durationSeconds: c.durationSeconds
+        }));
+      }
     }
 
     const hasAny = !!title || !!subtitle || !!(authors && authors.length) || !!coverImagePath;

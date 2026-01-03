@@ -4,6 +4,7 @@ import path from "path";
 import { app } from "electron";
 import { parseFile } from "music-metadata";
 import type { AudiobookChapter, AudiobookMetadata } from "@/src/shared/models/audiobook";
+import { extractChaptersFromMp4ChapTrack } from "@/src/main/library/mp4Chapters";
 
 function coversDir() {
   return path.join(app.getPath("userData"), "covers");
@@ -83,6 +84,20 @@ export async function extractAudiobookMetadata(
           durationSeconds: typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : undefined
         };
       });
+    }
+    // Fallback: some M4B files have `mdat` before `moov`, which `music-metadata` currently fails to extract chapters for.
+    // In that case, attempt to parse MP4 `chap` chapter-track directly.
+    if (!chapters?.length && String(mm.format.container ?? "").toLowerCase().includes("m4b")) {
+      const extracted = await extractChaptersFromMp4ChapTrack(filePath);
+      if (extracted?.length) {
+        chapters = extracted.map((c, idx) => ({
+          index: idx,
+          title: c.title,
+          filePath,
+          startSeconds: c.startSeconds,
+          durationSeconds: c.durationSeconds
+        }));
+      }
     }
 
     const hasAny = !!title || !!subtitle || !!(authors && authors.length > 0) || !!coverImagePath;
