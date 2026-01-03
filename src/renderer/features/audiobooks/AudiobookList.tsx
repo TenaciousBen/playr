@@ -4,6 +4,7 @@ import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
+const INTERNAL_MULTI_DND_BOOKS_TYPE = "application/x-playr-audiobook-ids";
 const INTERNAL_REORDER_TYPE = "application/x-playr-reorder-audiobook";
 const TRANSPARENT_GIF =
   "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
@@ -34,6 +35,8 @@ export function AudiobookList({
   books,
   onPlay,
   onOpenBook,
+  onShiftSelect,
+  selectedIds,
   onContextMenu,
   onToggleFavorite,
   playbackById,
@@ -43,6 +46,8 @@ export function AudiobookList({
   books: Audiobook[];
   onPlay: (b: Audiobook) => void;
   onOpenBook: (b: Audiobook) => void;
+  onShiftSelect?: (bookId: string) => void;
+  selectedIds?: Set<string>;
   onContextMenu?: (e: React.MouseEvent, b: Audiobook) => void;
   onToggleFavorite?: (b: Audiobook, next: boolean) => void;
   playbackById?: Record<string, { secondsIntoChapter?: number } | null>;
@@ -50,6 +55,8 @@ export function AudiobookList({
   onReorderCommit?: (dragId: string, targetId: string) => void;
 }) {
   const { state } = usePlayer();
+  const lastReorderOverIdRef = React.useRef<string | null>(null);
+  const sawReorderHoverRef = React.useRef(false);
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden">
       <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-gray-750 border-b border-gray-700 text-sm font-semibold text-gray-400">
@@ -64,6 +71,7 @@ export function AudiobookList({
       {books.map((b) => {
         const isFav = !!b.isFavorite;
         const isNowPlaying = state.nowPlaying?.book?.id === b.id;
+        const isSelected = !!selectedIds?.has(b.id);
         const seconds = isNowPlaying ? state.currentTime : playbackById?.[b.id]?.secondsIntoChapter ?? 0;
         const dur = (isNowPlaying && state.duration > 0 ? state.duration : 0) || b.durationSeconds || 0;
         const pct = dur > 0 ? Math.max(0, Math.min(1, seconds / dur)) : 0;
@@ -79,6 +87,18 @@ export function AudiobookList({
               logReorder("dragstart", { id: b.id, title: b.metadata?.title ?? b.displayName });
               (window as any).__playrReorderDragId = b.id;
               e.dataTransfer.effectAllowed = "copyMove";
+              const multiIds =
+                selectedIds && selectedIds.size > 1 && selectedIds.has(b.id)
+                  ? Array.from(selectedIds)
+                  : null;
+              if (multiIds && multiIds.length > 1) {
+                const payload = JSON.stringify(multiIds);
+                e.dataTransfer.setData(INTERNAL_MULTI_DND_BOOKS_TYPE, payload);
+                // Fallback: some environments drop custom DataTransfer types; stash on window too.
+                (window as any).__playrDnDBookIds = payload;
+              } else {
+                (window as any).__playrDnDBookIds = JSON.stringify([b.id]);
+              }
               e.dataTransfer.setData(INTERNAL_DND_BOOK_TYPE, b.id);
               e.dataTransfer.setData(INTERNAL_REORDER_TYPE, b.id);
               e.dataTransfer.setData("text/plain", b.id);
@@ -86,9 +106,22 @@ export function AudiobookList({
               img.src = TRANSPARENT_GIF;
               e.dataTransfer.setDragImage(img, 0, 0);
             }}
-            onDragEnd={() => {
+            onDragEnd={(e) => {
               logReorder("dragend", { id: b.id });
+              const dropEffect = e.dataTransfer?.dropEffect ?? "none";
+              const lastOverId = lastReorderOverIdRef.current;
+              const dragId = (window as any).__playrReorderDragId || b.id;
+
+              // If we showed a preview reorder but the user released outside an item drop-target,
+              // persist to the last hovered target so the order doesn't "snap back" on reload.
+              //
+              // Avoid committing when the user was doing a copy-drop (e.g. dragging into a collection).
+              if (sawReorderHoverRef.current && lastOverId && dropEffect !== "copy") {
+                if (dragId && dragId !== lastOverId) onReorderCommit?.(dragId, lastOverId);
+              }
               (window as any).__playrReorderDragId = null;
+              lastReorderOverIdRef.current = null;
+              sawReorderHoverRef.current = false;
             }}
             onDragOver={(e) => {
               const types = Array.from(e.dataTransfer?.types ?? []);
@@ -102,6 +135,8 @@ export function AudiobookList({
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               logReorder("dragover", { dragId, overId: b.id, types });
+              sawReorderHoverRef.current = true;
+              lastReorderOverIdRef.current = b.id;
               onReorderPreview?.(dragId, b.id);
             }}
             onDrop={(e) => {
@@ -117,9 +152,17 @@ export function AudiobookList({
               logReorder("drop", { dragId, targetId: b.id, types });
               onReorderCommit?.(dragId, b.id);
               (window as any).__playrReorderDragId = null;
+              lastReorderOverIdRef.current = null;
+              sawReorderHoverRef.current = false;
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
-            onClick={() => onOpenBook(b)}
+            onClick={(e) => {
+              if (e.shiftKey) {
+                onShiftSelect?.(b.id);
+                return;
+              }
+              onOpenBook(b);
+            }}
           >
             <div className="col-span-1 text-center">
               <button
@@ -134,13 +177,20 @@ export function AudiobookList({
               </button>
             </div>
             <div className="col-span-4 flex items-center space-x-3">
-              {b.metadata?.coverImagePath ? (
-                <img className="w-12 h-12 object-cover rounded" src={toFileUrl(b.metadata.coverImagePath)} alt="cover" />
-              ) : (
-                <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center">
-                  <i className="fas fa-book text-gray-300"></i>
-                </div>
-              )}
+              <div className="relative">
+                {b.metadata?.coverImagePath ? (
+                  <img className="w-12 h-12 object-cover rounded" src={toFileUrl(b.metadata.coverImagePath)} alt="cover" />
+                ) : (
+                  <div className="w-12 h-12 rounded bg-gray-700 flex items-center justify-center">
+                    <i className="fas fa-book text-gray-300"></i>
+                  </div>
+                )}
+                {isSelected ? (
+                  <div className="absolute -top-2 -left-2 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center shadow-md">
+                    <i className="fas fa-check text-white text-xs"></i>
+                  </div>
+                ) : null}
+              </div>
               <span className="font-medium">{b.metadata?.title ?? b.displayName}</span>
             </div>
             <div className="col-span-3 text-gray-400">{b.metadata?.authors?.[0] ?? ""}</div>

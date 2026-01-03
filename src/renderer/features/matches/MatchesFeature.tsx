@@ -232,7 +232,8 @@ export function MatchesFeature() {
             value={settings.sortBy}
             onChange={(e) => {
               void (async () => {
-                const next: UserSettings = { ...settings, sortBy: e.target.value as UserSettings["sortBy"] };
+                const current = await window.audioplayer.settings.get();
+                const next: UserSettings = { ...current, sortBy: e.target.value as UserSettings["sortBy"] };
                 setSettings(next);
                 await window.audioplayer.settings.set(next);
                 window.dispatchEvent(new Event("audioplayer:settings-changed"));

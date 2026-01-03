@@ -12,6 +12,8 @@ import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 import { DropdownButton } from "@/src/renderer/shared/DropdownButton";
+import { useMultiSelect } from "@/src/renderer/shared/useMultiSelect";
+import { moveIdsInList } from "@/src/renderer/shared/moveIdsInList";
 
 function formatHoursMinutes(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -181,24 +183,29 @@ export function AuthorFeature() {
     [authorOrderIds, books, playbackSecondsById, settings.sortBy]
   );
 
+  const orderedIds = useMemo(() => sortedBooks.map((b) => b.id), [sortedBooks]);
+  const selection = useMultiSelect(orderedIds);
+
   const applyReorderPreview = useCallback(
     (dragId: string, targetId: string) => {
       // eslint-disable-next-line no-console
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][author] preview", { authorKey, dragId, targetId });
       const base = authorOrderIds.length ? authorOrderIds : sortedBooks.map((b) => b.id);
       const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
       setSettings((s) => ({
         ...s,
         sortBy: "userOrder",
-        authorOrders: { ...(s.authorOrders ?? {}), [authorKey]: ids }
+        authorOrders: {
+          ...(s.authorOrders ?? {}),
+          [authorKey]: moveIdsInList(
+            ids,
+            Array.from(selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId])),
+            targetId
+          )
+        }
       }));
     },
-    [authorKey, authorOrderIds, sortedBooks]
+    [authorKey, authorOrderIds, selection.selectedSet, sortedBooks]
   );
 
   const commitReorder = useCallback(
@@ -207,23 +214,25 @@ export function AuthorFeature() {
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][author] commit", { authorKey, dragId, targetId });
       const base = authorOrderIds.length ? authorOrderIds : sortedBooks.map((b) => b.id);
       const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
+      const nextIds = moveIdsInList(
+        ids,
+        Array.from(selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId])),
+        targetId
+      );
+      if (nextIds.join("|") === ids.join("|")) return;
       void (async () => {
+        const current = await window.audioplayer.settings.get();
         const next: UserSettings = {
-          ...settings,
+          ...current,
           sortBy: "userOrder",
-          authorOrders: { ...(settings.authorOrders ?? {}), [authorKey]: ids }
+          authorOrders: { ...(current.authorOrders ?? {}), [authorKey]: nextIds }
         };
         setSettings(next);
         await window.audioplayer.settings.set(next);
         window.dispatchEvent(new Event("audioplayer:settings-changed"));
       })();
     },
-    [authorKey, authorOrderIds, settings, sortedBooks]
+    [authorKey, authorOrderIds, selection.selectedSet, settings, sortedBooks]
   );
 
   const openDetails = useCallback(
@@ -305,6 +314,16 @@ export function AuthorFeature() {
           <p className="text-gray-400 mt-1">{subtitle}</p>
         </div>
         <div className="flex items-center space-x-3">
+          {selection.hasSelection ? (
+            <button
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors flex items-center space-x-2"
+              onClick={selection.clearSelection}
+              title="Clear selection"
+            >
+              <i className="fas fa-times-circle text-xs"></i>
+              <span>Clear selection</span>
+            </button>
+          ) : null}
           <div className="relative">
             <DropdownButton
               label={creating ? "Creating…" : "Create Collection"}
@@ -328,7 +347,8 @@ export function AuthorFeature() {
             value={settings.sortBy}
             onChange={(e) => {
               void (async () => {
-                const next: UserSettings = { ...settings, sortBy: e.target.value as UserSettings["sortBy"] };
+                const current = await window.audioplayer.settings.get();
+                const next: UserSettings = { ...current, sortBy: e.target.value as UserSettings["sortBy"] };
                 setSettings(next);
                 await window.audioplayer.settings.set(next);
                 window.dispatchEvent(new Event("audioplayer:settings-changed"));
@@ -384,6 +404,8 @@ export function AuthorFeature() {
             books={sortedBooks}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -406,6 +428,8 @@ export function AuthorFeature() {
             subtitle={(b) => `${b.chapters.length} file(s)`}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -432,6 +456,7 @@ export function AuthorFeature() {
         x={menuPos.x}
         y={menuPos.y}
         onClose={() => setMenuOpen(false)}
+        onClearSelection={selection.hasSelection ? selection.clearSelection : undefined}
         onDetails={() => {
           if (selectedId) void openDetails(selectedId);
         }}

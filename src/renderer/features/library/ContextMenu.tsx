@@ -6,6 +6,7 @@ export function ContextMenu({
   y,
   onClose,
   onDetails,
+  onClearSelection,
   onAddToCollection,
   onRemove,
   removeLabel = "Remove from Playr",
@@ -16,6 +17,7 @@ export function ContextMenu({
   y: number;
   onClose: () => void;
   onDetails: () => void;
+  onClearSelection?: () => void;
   onAddToCollection?: () => void;
   onRemove: () => void;
   removeLabel?: string;
@@ -55,6 +57,21 @@ export function ContextMenu({
       className="fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-2 z-[120] min-w-[160px]"
       style={style}
     >
+      {onClearSelection ? (
+        <>
+          <button
+            onClick={() => {
+              onClearSelection();
+              onClose();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center space-x-3"
+          >
+            <i className="fas fa-times-circle text-sm"></i>
+            <span>Clear selection</span>
+          </button>
+          <div className="border-t border-gray-700 my-1"></div>
+        </>
+      ) : null}
       <button
         onClick={() => {
           onDetails();

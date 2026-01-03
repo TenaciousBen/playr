@@ -11,6 +11,8 @@ import { DEFAULT_USER_SETTINGS, type UserSettings } from "@/src/shared/models/us
 import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
+import { useMultiSelect } from "@/src/renderer/shared/useMultiSelect";
+import { moveIdsInList } from "@/src/renderer/shared/moveIdsInList";
 
 function rangeLabel(r: UserSettings["recentlyAddedRange"]) {
   return r === "today"
@@ -171,20 +173,24 @@ export function LibraryFeature({
     [playbackSecondsById, settings.libraryOrder, settings.sortBy, shown]
   );
 
+  const orderedIds = useMemo(() => sortedShown.map((b) => b.id), [sortedShown]);
+  const selection = useMultiSelect(orderedIds);
+
   const applyReorderPreview = useCallback(
     (dragId: string, targetId: string) => {
       // eslint-disable-next-line no-console
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][library] preview", { dragId, targetId });
       const current = (settings.libraryOrder ?? []).length ? (settings.libraryOrder ?? []) : sortedShown.map((b) => b.id);
       const ids = Array.from(new Set([...current, ...sortedShown.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
-      setSettings((s) => ({ ...s, sortBy: "userOrder", libraryOrder: ids }));
+      const next = moveIdsInList(
+        ids,
+        Array.from(selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId])),
+        targetId
+      );
+      if (next.join("|") === ids.join("|")) return;
+      setSettings((s) => ({ ...s, sortBy: "userOrder", libraryOrder: next }));
     },
-    [settings.libraryOrder, sortedShown]
+    [selection.selectedSet, settings.libraryOrder, sortedShown]
   );
 
   const commitReorder = useCallback(
@@ -193,19 +199,21 @@ export function LibraryFeature({
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][library] commit", { dragId, targetId });
       const current = (settings.libraryOrder ?? []).length ? (settings.libraryOrder ?? []) : sortedShown.map((b) => b.id);
       const ids = Array.from(new Set([...current, ...sortedShown.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
+      const nextIds = moveIdsInList(
+        ids,
+        Array.from(selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId])),
+        targetId
+      );
+      if (nextIds.join("|") === ids.join("|")) return;
       void (async () => {
-        const next: UserSettings = { ...settings, sortBy: "userOrder", libraryOrder: ids };
+        const current = await window.audioplayer.settings.get();
+        const next: UserSettings = { ...current, sortBy: "userOrder", libraryOrder: nextIds };
         setSettings(next);
         await window.audioplayer.settings.set(next);
         window.dispatchEvent(new Event("audioplayer:settings-changed"));
       })();
     },
-    [settings, sortedShown]
+    [selection.selectedSet, settings, sortedShown]
   );
 
   const openDetails = useCallback(
@@ -254,6 +262,16 @@ export function LibraryFeature({
           <p className="text-gray-400 mt-1">{loading ? "Loading…" : `${shown.length} audiobook(s)`}</p>
         </div>
         <div className="flex items-center space-x-3">
+          {selection.hasSelection ? (
+            <button
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors flex items-center space-x-2"
+              onClick={selection.clearSelection}
+              title="Clear selection"
+            >
+              <i className="fas fa-times-circle text-xs"></i>
+              <span>Clear selection</span>
+            </button>
+          ) : null}
           {mode === "recent" ? (
             <div className="relative" id="time-filter-dropdown">
               <button
@@ -286,7 +304,8 @@ export function LibraryFeature({
                           ].join(" ")}
                           onClick={() => {
                             void (async () => {
-                              const next: UserSettings = { ...settings, recentlyAddedRange: r };
+                              const current = await window.audioplayer.settings.get();
+                              const next: UserSettings = { ...current, recentlyAddedRange: r };
                               setSettings(next);
                               setTimeMenuOpen(false);
                               await window.audioplayer.settings.set(next);
@@ -308,7 +327,8 @@ export function LibraryFeature({
             value={settings.sortBy}
             onChange={(e) => {
               void (async () => {
-                const next: UserSettings = { ...settings, sortBy: e.target.value as UserSettings["sortBy"] };
+                const current = await window.audioplayer.settings.get();
+                const next: UserSettings = { ...current, sortBy: e.target.value as UserSettings["sortBy"] };
                 setSettings(next);
                 await window.audioplayer.settings.set(next);
                 window.dispatchEvent(new Event("audioplayer:settings-changed"));
@@ -336,6 +356,8 @@ export function LibraryFeature({
             books={sortedShown}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -358,6 +380,8 @@ export function LibraryFeature({
             subtitle={(b) => `${b.chapters.length} file(s)`}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -382,6 +406,7 @@ export function LibraryFeature({
         x={menuPos.x}
         y={menuPos.y}
         onClose={() => setMenuOpen(false)}
+        onClearSelection={selection.hasSelection ? selection.clearSelection : undefined}
         onDetails={() => {
           if (selectedId) void openDetails(selectedId);
         }}

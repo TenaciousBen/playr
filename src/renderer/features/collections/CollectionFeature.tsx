@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { Audiobook } from "@/src/shared/models/audiobook";
 import type { Collection } from "@/src/shared/models/collection";
@@ -13,6 +13,8 @@ import { sortAudiobooks } from "@/src/renderer/shared/sortAudiobooks";
 import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 import { AddToCollectionModal } from "@/src/renderer/features/collections/AddToCollectionModal";
 import { DropdownButton } from "@/src/renderer/shared/DropdownButton";
+import { useMultiSelect } from "@/src/renderer/shared/useMultiSelect";
+import { moveIdsInList } from "@/src/renderer/shared/moveIdsInList";
 
 function formatHoursMinutes(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -47,6 +49,10 @@ export function CollectionFeature() {
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [addToCollectionBook, setAddToCollectionBook] = useState<Audiobook | null>(null);
   const [localOrderIds, setLocalOrderIds] = useState<string[]>([]);
+  const localOrderIdsRef = useRef<string[]>([]);
+  const collectionIdRef = useRef<string>("");
+  const collectionOrderRef = useRef<string[]>([]);
+  const reorderDirtyRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -70,6 +76,48 @@ export function CollectionFeature() {
       setLoading(false);
     }
   }, [id]);
+
+  useEffect(() => {
+    localOrderIdsRef.current = localOrderIds;
+  }, [localOrderIds]);
+
+  useEffect(() => {
+    collectionIdRef.current = collection?.id ?? "";
+    collectionOrderRef.current = collection?.audiobookIds ?? [];
+  }, [collection?.audiobookIds, collection?.id]);
+
+  // Persist reorder even if the user releases outside a specific row/card drop target.
+  // We treat `localOrderIds` as the source of truth for the user's intended order.
+  useEffect(() => {
+    const tryPersist = () => {
+      if (!reorderDirtyRef.current) return;
+      const collectionId = collectionIdRef.current;
+      if (!collectionId) return;
+      const ids = localOrderIdsRef.current ?? [];
+      const before = collectionOrderRef.current ?? [];
+      if (ids.length === 0 || ids.join("|") === before.join("|")) {
+        reorderDirtyRef.current = false;
+        return;
+      }
+      reorderDirtyRef.current = false;
+      void (async () => {
+        try {
+          await window.audioplayer.collections.setBooks(collectionId, ids);
+          window.dispatchEvent(new Event("audioplayer:collections-changed"));
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error("[REORDER][collection] failed to persist", e);
+        }
+      })();
+    };
+
+    document.addEventListener("dragend", tryPersist);
+    document.addEventListener("drop", tryPersist);
+    return () => {
+      document.removeEventListener("dragend", tryPersist);
+      document.removeEventListener("drop", tryPersist);
+    };
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -152,21 +200,24 @@ export function CollectionFeature() {
     [books, localOrderIds, playbackSecondsById, settings.sortBy]
   );
 
+  const orderedIds = useMemo(() => sortedBooks.map((b) => b.id), [sortedBooks]);
+  const selection = useMultiSelect(orderedIds);
+
   const applyReorderPreview = useCallback(
     (dragId: string, targetId: string) => {
       // eslint-disable-next-line no-console
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][collection] preview", { collectionId: collection?.id, dragId, targetId });
       const base = localOrderIds.length ? localOrderIds : sortedBooks.map((b) => b.id);
       const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
-      setLocalOrderIds(ids);
+      const draggedSet = selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId]);
+      if (draggedSet.has(targetId)) return;
+      const next = moveIdsInList(ids, Array.from(draggedSet), targetId);
+      if (next.join("|") === ids.join("|")) return;
+      setLocalOrderIds(next);
+      reorderDirtyRef.current = true;
       setSettings((s) => ({ ...s, sortBy: "userOrder" }));
     },
-    [localOrderIds, sortedBooks]
+    [collection?.id, localOrderIds, selection.selectedSet, sortedBooks]
   );
 
   const commitReorder = useCallback(
@@ -176,22 +227,22 @@ export function CollectionFeature() {
       if (localStorage.getItem("debugReorder") === "1") console.log("[REORDER][collection] commit", { collectionId: collection.id, dragId, targetId });
       const base = localOrderIds.length ? localOrderIds : sortedBooks.map((b) => b.id);
       const ids = Array.from(new Set([...base, ...sortedBooks.map((b) => b.id)]));
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return;
-      ids.splice(from, 1);
-      ids.splice(to, 0, dragId);
-      setLocalOrderIds(ids);
+      const draggedSet = selection.selectedSet.has(dragId) ? selection.selectedSet : new Set([dragId]);
+      if (draggedSet.has(targetId)) return;
+      const nextIds = moveIdsInList(ids, Array.from(draggedSet), targetId);
+      if (nextIds.join("|") === ids.join("|")) return;
+      setLocalOrderIds(nextIds);
       void (async () => {
-        const nextSettings: UserSettings = { ...settings, sortBy: "userOrder" };
+        const current = await window.audioplayer.settings.get();
+        const nextSettings: UserSettings = { ...current, sortBy: "userOrder" };
         setSettings(nextSettings);
         await window.audioplayer.settings.set(nextSettings);
         window.dispatchEvent(new Event("audioplayer:settings-changed"));
-        await window.audioplayer.collections.setBooks(collection.id, ids);
+        await window.audioplayer.collections.setBooks(collection.id, nextIds);
         window.dispatchEvent(new Event("audioplayer:collections-changed"));
       })();
     },
-    [collection, localOrderIds, settings, sortedBooks]
+    [collection, localOrderIds, selection.selectedSet, settings, sortedBooks]
   );
 
   // Total listened time for books in collection (best-effort).
@@ -280,6 +331,16 @@ export function CollectionFeature() {
           <p className="text-gray-400 mt-1">{loading ? "Loading…" : `${books.length} audiobook(s)`}</p>
         </div>
         <div className="flex items-center space-x-3">
+          {selection.hasSelection ? (
+            <button
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors flex items-center space-x-2"
+              onClick={selection.clearSelection}
+              title="Clear selection"
+            >
+              <i className="fas fa-times-circle text-xs"></i>
+              <span>Clear selection</span>
+            </button>
+          ) : null}
           <DropdownButton
             label="Play Collection"
             title="Collection actions"
@@ -288,7 +349,7 @@ export function CollectionFeature() {
             dropdownDisabled={!collection}
             onPrimaryClick={() => {
               if (!collection) return;
-              void player.actions.playCollection(collection.id, sortedBooks.map((b) => b.id));
+              void player.actions.playCollection(collection.id, localOrderIds.length ? localOrderIds : collection.audiobookIds);
             }}
             secondaryActions={[
               {
@@ -305,7 +366,8 @@ export function CollectionFeature() {
             value={settings.sortBy}
             onChange={(e) => {
               void (async () => {
-                const next: UserSettings = { ...settings, sortBy: e.target.value as UserSettings["sortBy"] };
+                const current = await window.audioplayer.settings.get();
+                const next: UserSettings = { ...current, sortBy: e.target.value as UserSettings["sortBy"] };
                 setSettings(next);
                 await window.audioplayer.settings.set(next);
                 window.dispatchEvent(new Event("audioplayer:settings-changed"));
@@ -363,6 +425,8 @@ export function CollectionFeature() {
             books={sortedBooks}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -385,6 +449,8 @@ export function CollectionFeature() {
             subtitle={(b) => `${b.chapters.length} file(s)`}
             onPlay={(b) => void player.actions.playBook(b)}
             onOpenBook={(b) => navigate(`/book/${encodeURIComponent(b.id)}`)}
+            onShiftSelect={(bookId) => selection.toggleSelect(bookId, true)}
+            selectedIds={selection.selectedSet}
             onContextMenu={(e, b) => {
               e.preventDefault();
               setSelectedId(b.id);
@@ -409,6 +475,7 @@ export function CollectionFeature() {
         x={menuPos.x}
         y={menuPos.y}
         onClose={() => setMenuOpen(false)}
+        onClearSelection={selection.hasSelection ? selection.clearSelection : undefined}
         onDetails={() => {
           if (selectedId) void openDetails(selectedId);
         }}

@@ -11,6 +11,7 @@ import { ConfirmModal } from "@/src/renderer/shared/ConfirmModal";
 import appIcon from "@/assets/icon.ico";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
+const INTERNAL_MULTI_DND_BOOKS_TYPE = "application/x-playr-audiobook-ids";
 
 function NavItem({
   to,
@@ -251,7 +252,11 @@ export function AppShell() {
   }, []);
 
   React.useEffect(() => {
-    const clear = () => setDragOverCollectionId(null);
+    const clear = () => {
+      setDragOverCollectionId(null);
+      // Clear multi-drag fallback after the drop lifecycle completes.
+      (window as any).__playrDnDBookIds = null;
+    };
     document.addEventListener("dragend", clear);
     document.addEventListener("drop", clear);
     return () => {
@@ -260,19 +265,20 @@ export function AppShell() {
     };
   }, []);
 
-  const addBookToCollection = useCallback(
-    async (collectionId: string, audiobookId: string) => {
-      const current = collections.find((c) => c.id === collectionId);
-      if (!current) return;
-      if (current.audiobookIds.includes(audiobookId)) return;
-      const nextIds = [...current.audiobookIds, audiobookId];
-      await window.audioplayer.collections.setBooks(collectionId, nextIds);
-      const list = await window.audioplayer.collections.list();
-      setCollections(list);
-      window.dispatchEvent(new Event("audioplayer:collections-changed"));
-    },
-    [collections]
-  );
+  const addBooksToCollection = useCallback(async (collectionId: string, audiobookIds: string[]) => {
+    const addIds = (audiobookIds ?? []).map((x) => String(x)).filter((s) => s.length > 0);
+    if (addIds.length === 0) return;
+
+    const currentList = await window.audioplayer.collections.list();
+    const current = currentList.find((c) => c.id === collectionId);
+    if (!current) return;
+
+    const nextIds = Array.from(new Set([...(current.audiobookIds ?? []), ...addIds]));
+    await window.audioplayer.collections.setBooks(collectionId, nextIds);
+    const list = await window.audioplayer.collections.list();
+    setCollections(list);
+    window.dispatchEvent(new Event("audioplayer:collections-changed"));
+  }, []);
 
   const commitRenameCollection = useCallback(async (collectionId: string, nextName: string) => {
     const name = nextName.trim();
@@ -392,7 +398,8 @@ export function AppShell() {
               title="Grid view"
               onClick={() => {
                 void (async () => {
-                  const next: UserSettings = { ...settings, viewMode: "grid" };
+                  const current = await window.audioplayer.settings.get();
+                  const next: UserSettings = { ...current, viewMode: "grid" };
                   setSettings(next);
                   await window.audioplayer.settings.set(next);
                   window.dispatchEvent(new Event("audioplayer:settings-changed"));
@@ -409,7 +416,8 @@ export function AppShell() {
               title="List view"
               onClick={() => {
                 void (async () => {
-                  const next: UserSettings = { ...settings, viewMode: "list" };
+                  const current = await window.audioplayer.settings.get();
+                  const next: UserSettings = { ...current, viewMode: "list" };
                   setSettings(next);
                   await window.audioplayer.settings.set(next);
                   window.dispatchEvent(new Event("audioplayer:settings-changed"));
@@ -582,13 +590,13 @@ export function AppShell() {
                         onContextMenu={(e) => openCollectionMenu(e, c.id)}
                         onDragEnter={(e) => {
                           const types = Array.from(e.dataTransfer?.types ?? []);
-                          if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
+                          if (!types.includes(INTERNAL_DND_BOOK_TYPE) && !types.includes(INTERNAL_MULTI_DND_BOOKS_TYPE)) return;
                           e.preventDefault();
                           setDragOverCollectionId(c.id);
                         }}
                         onDragOver={(e) => {
                           const types = Array.from(e.dataTransfer?.types ?? []);
-                          if (!types.includes(INTERNAL_DND_BOOK_TYPE)) return;
+                          if (!types.includes(INTERNAL_DND_BOOK_TYPE) && !types.includes(INTERNAL_MULTI_DND_BOOKS_TYPE)) return;
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "copy";
                           setDragOverCollectionId(c.id);
@@ -597,11 +605,31 @@ export function AppShell() {
                           setDragOverCollectionId((prev) => (prev === c.id ? null : prev));
                         }}
                         onDrop={(e) => {
-                          const id = e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE);
-                          if (!id) return;
                           e.preventDefault();
                           setDragOverCollectionId(null);
-                          void addBookToCollection(c.id, id);
+                          void (async () => {
+                            const multiRaw = e.dataTransfer.getData(INTERNAL_MULTI_DND_BOOKS_TYPE);
+                            const fallbackRaw = (window as any).__playrDnDBookIds as string | null | undefined;
+                            const raw = multiRaw || fallbackRaw || "";
+                            if (raw) {
+                              try {
+                                const ids = JSON.parse(raw) as unknown;
+                                if (Array.isArray(ids) && ids.length > 0) {
+                                  await addBooksToCollection(
+                                    c.id,
+                                    ids.map((x) => String(x)).filter((s) => s.length > 0)
+                                  );
+                                  return;
+                                }
+                              } catch {
+                                // ignore
+                              }
+                            }
+
+                            const id = e.dataTransfer.getData(INTERNAL_DND_BOOK_TYPE);
+                            if (!id) return;
+                            await addBooksToCollection(c.id, [id]);
+                          })();
                         }}
                       >
                         <div className="flex items-center min-w-0">

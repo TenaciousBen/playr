@@ -4,6 +4,7 @@ import { toFileUrl } from "@/src/renderer/shared/toFileUrl";
 import { usePlayer } from "@/src/renderer/features/player/PlayerContext";
 
 const INTERNAL_DND_BOOK_TYPE = "application/x-playr-audiobook-id";
+const INTERNAL_MULTI_DND_BOOKS_TYPE = "application/x-playr-audiobook-ids";
 const INTERNAL_REORDER_TYPE = "application/x-playr-reorder-audiobook";
 const TRANSPARENT_GIF =
   "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
@@ -27,6 +28,8 @@ export function AudiobookGrid({
   subtitle,
   onPlay,
   onOpenBook,
+  onShiftSelect,
+  selectedIds,
   onContextMenu,
   onToggleFavorite,
   playbackById,
@@ -37,6 +40,8 @@ export function AudiobookGrid({
   subtitle?: (b: Audiobook) => React.ReactNode;
   onPlay: (b: Audiobook) => void;
   onOpenBook: (b: Audiobook) => void;
+  onShiftSelect?: (bookId: string) => void;
+  selectedIds?: Set<string>;
   onContextMenu?: (e: React.MouseEvent, b: Audiobook) => void;
   onToggleFavorite?: (b: Audiobook, next: boolean) => void;
   playbackById?: Record<string, { secondsIntoChapter?: number } | null>;
@@ -44,11 +49,14 @@ export function AudiobookGrid({
   onReorderCommit?: (dragId: string, targetId: string) => void;
 }) {
   const { state } = usePlayer();
+  const lastReorderOverIdRef = React.useRef<string | null>(null);
+  const sawReorderHoverRef = React.useRef(false);
   return (
     <div className="grid grid-cols-5 gap-6">
-      {books.map((b) => {
+      {books.map((b, idx) => {
         const isFav = !!b.isFavorite;
         const isNowPlaying = state.nowPlaying?.book?.id === b.id;
+        const isSelected = !!selectedIds?.has(b.id);
         const seconds = isNowPlaying
           ? state.currentTime
           : playbackById?.[b.id]?.secondsIntoChapter ?? 0;
@@ -66,6 +74,18 @@ export function AudiobookGrid({
               logReorder("dragstart", { id: b.id, title: b.metadata?.title ?? b.displayName });
               (window as any).__playrReorderDragId = b.id;
               e.dataTransfer.effectAllowed = "copyMove";
+              const multiIds =
+                selectedIds && selectedIds.size > 1 && selectedIds.has(b.id)
+                  ? Array.from(selectedIds)
+                  : null;
+              if (multiIds && multiIds.length > 1) {
+                const payload = JSON.stringify(multiIds);
+                e.dataTransfer.setData(INTERNAL_MULTI_DND_BOOKS_TYPE, payload);
+                // Fallback: some environments drop custom DataTransfer types; stash on window too.
+                (window as any).__playrDnDBookIds = payload;
+              } else {
+                (window as any).__playrDnDBookIds = JSON.stringify([b.id]);
+              }
               e.dataTransfer.setData(INTERNAL_DND_BOOK_TYPE, b.id);
               e.dataTransfer.setData(INTERNAL_REORDER_TYPE, b.id);
               e.dataTransfer.setData("text/plain", b.id);
@@ -74,9 +94,22 @@ export function AudiobookGrid({
               img.src = TRANSPARENT_GIF;
               e.dataTransfer.setDragImage(img, 0, 0);
             }}
-            onDragEnd={() => {
+            onDragEnd={(e) => {
               logReorder("dragend", { id: b.id });
+              const dropEffect = e.dataTransfer?.dropEffect ?? "none";
+              const lastOverId = lastReorderOverIdRef.current;
+              const dragId = (window as any).__playrReorderDragId || b.id;
+
+              // If we showed a preview reorder but the user released outside an item drop-target,
+              // persist to the last hovered target so the order doesn't "snap back" on reload.
+              //
+              // Avoid committing when the user was doing a copy-drop (e.g. dragging into a collection).
+              if (sawReorderHoverRef.current && lastOverId && dropEffect !== "copy") {
+                if (dragId && dragId !== lastOverId) onReorderCommit?.(dragId, lastOverId);
+              }
               (window as any).__playrReorderDragId = null;
+              lastReorderOverIdRef.current = null;
+              sawReorderHoverRef.current = false;
             }}
             onDragOver={(e) => {
               const types = Array.from(e.dataTransfer?.types ?? []);
@@ -90,6 +123,8 @@ export function AudiobookGrid({
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               logReorder("dragover", { dragId, overId: b.id, types });
+              sawReorderHoverRef.current = true;
+              lastReorderOverIdRef.current = b.id;
               onReorderPreview?.(dragId, b.id);
             }}
             onDrop={(e) => {
@@ -105,9 +140,17 @@ export function AudiobookGrid({
               logReorder("drop", { dragId, targetId: b.id, types });
               onReorderCommit?.(dragId, b.id);
               (window as any).__playrReorderDragId = null;
+              lastReorderOverIdRef.current = null;
+              sawReorderHoverRef.current = false;
             }}
             onContextMenu={(e) => onContextMenu?.(e, b)}
-            onClick={() => onOpenBook(b)}
+            onClick={(e) => {
+              if (e.shiftKey) {
+                onShiftSelect?.(b.id);
+                return;
+              }
+              onOpenBook(b);
+            }}
           >
             <div className="relative mb-3">
               {b.metadata?.coverImagePath ? (
@@ -122,8 +165,17 @@ export function AudiobookGrid({
                 </div>
               )}
 
+              {isSelected ? (
+                <div className="absolute top-2 left-2 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shadow-md">
+                  <i className="fas fa-check text-white text-sm"></i>
+                </div>
+              ) : null}
+
               <button
-                className="absolute top-2 left-2 w-8 h-8 bg-gray-900 bg-opacity-70 rounded-full flex items-center justify-center hover:bg-opacity-90 transition-all opacity-0 group-hover:opacity-100"
+                className={[
+                  "absolute top-2 w-8 h-8 bg-gray-900 bg-opacity-70 rounded-full flex items-center justify-center hover:bg-opacity-90 transition-all opacity-0 group-hover:opacity-100",
+                  isSelected ? "left-11" : "left-2"
+                ].join(" ")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onPlay(b);

@@ -18,7 +18,7 @@ export function DropOverlay({
     const allowDrop = (e: DragEvent) => {
       // Ignore internal drag-and-drop (e.g. dragging audiobooks into collections).
       const types = Array.from(e.dataTransfer?.types ?? []);
-      if (types.includes("application/x-playr-audiobook-id")) return;
+      if (types.includes("application/x-playr-audiobook-id") || types.includes("application/x-playr-audiobook-ids")) return;
 
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
